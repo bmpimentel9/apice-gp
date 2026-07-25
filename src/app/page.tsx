@@ -188,6 +188,8 @@ export default function Pagina() {
           <HUD
             refHandle={hudRef}
             canhoto={prefs.canhoto}
+            pista={jogoRef.current?.pistaAtual ?? null}
+            corCircuito={dadosCircuito.cor}
             onFreioDown={() => {}}
             onFreioUp={() => {}}
             onOvertake={() => {}}

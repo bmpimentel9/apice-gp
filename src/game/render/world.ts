@@ -8,28 +8,40 @@
  */
 import {
   BufferGeometry, Float32BufferAttribute, Mesh, MeshBasicMaterial, Group,
-  DoubleSide, Color,
+  DoubleSide, Color, type WebGLRenderer,
 } from 'three';
+import { obterTexturas } from './textures';
 import type { Pista } from '../sim/track';
 import { AMBIENTES, CORES, corComLuz, ruidoSuave, type HoraDoDia } from './palette';
 
 interface Construtor {
   pos: number[];
   cor: number[];
+  uv: number[];
   idx: number[];
 }
 
-const novoConstrutor = (): Construtor => ({ pos: [], cor: [], idx: [] });
+const novoConstrutor = (): Construtor => ({ pos: [], cor: [], uv: [], idx: [] });
+
+/** Escala das texturas: um azulejo a cada 7 m de pista. */
+const ESCALA_UV = 1 / 7;
 
 function addQuad(
   c: Construtor,
   p1: [number, number, number], p2: [number, number, number],
   p3: [number, number, number], p4: [number, number, number],
   cor1: [number, number, number], cor2 = cor1, cor3 = cor2, cor4 = cor3,
+  uv?: [number, number, number, number],
 ) {
   const base = c.pos.length / 3;
   c.pos.push(...p1, ...p2, ...p3, ...p4);
   c.cor.push(...cor1, ...cor2, ...cor3, ...cor4);
+  if (uv) {
+    const [u0, v0, u1, v1] = uv;
+    c.uv.push(u0, v0, u1, v0, u1, v1, u0, v1);
+  } else {
+    c.uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+  }
   c.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
 }
 
@@ -37,6 +49,7 @@ function finalizar(c: Construtor, material: MeshBasicMaterial) {
   const g = new BufferGeometry();
   g.setAttribute('position', new Float32BufferAttribute(c.pos, 3));
   g.setAttribute('color', new Float32BufferAttribute(c.cor, 3));
+  g.setAttribute('uv', new Float32BufferAttribute(c.uv, 2));
   g.setIndex(c.idx);
   g.computeBoundingSphere();
   const m = new Mesh(g, material);
@@ -49,7 +62,7 @@ export interface MundoGerado {
   triangulos: number;
 }
 
-export function gerarMundo(pista: Pista, hora: HoraDoDia): MundoGerado {
+export function gerarMundo(pista: Pista, hora: HoraDoDia, renderer: WebGLRenderer): MundoGerado {
   const amb = AMBIENTES[hora];
   const n = pista.n;
   const W = pista.largura;
@@ -58,7 +71,9 @@ export function gerarMundo(pista: Pista, hora: HoraDoDia): MundoGerado {
 
   const asfalto = novoConstrutor();
   const detalhe = novoConstrutor(); // kerbs, linhas, largada — cores vivas
-  const terreno = novoConstrutor();
+  const grama = novoConstrutor();
+  const brita = novoConstrutor();
+  const concreto = novoConstrutor();
 
   // vetores auxiliares por índice
   const ponto = (i: number, off: number, alturaExtra = 0): [number, number, number] => [
@@ -112,7 +127,9 @@ export function gerarMundo(pista: Pista, hora: HoraDoDia): MundoGerado {
       const t1 = tomBase(i), t2 = tomBase(j);
       const c1 = corComLuz(base, l1 * t1, amb);
       const c2 = corComLuz(base, l2 * t2, amb);
-      addQuad(asfalto, ponto(i, a1), ponto(i, b1), ponto(j, b2), ponto(j, a2), c1, c1, c2, c2);
+      const v0 = pista.s[i] * ESCALA_UV, v1 = (pista.s[i] + 8) * ESCALA_UV;
+      addQuad(asfalto, ponto(i, a1), ponto(i, b1), ponto(j, b2), ponto(j, a2), c1, c1, c2, c2,
+        [a1 * ESCALA_UV, v0, b1 * ESCALA_UV, v1]);
     }
 
     // ── Linhas brancas de limite de pista ───────────────────────────────────
@@ -129,50 +146,95 @@ export function gerarMundo(pista: Pista, hora: HoraDoDia): MundoGerado {
     // ── Kerbs (zebras) — só nas curvas, alternando vermelho e branco ────────
     if (emCurva) {
       const ladoInterno = k1 > 0 ? 1 : -1;
-      const alterna = Math.floor(pista.s[i] / 2.6) % 2 === 0;
-      const corKerb = alterna ? CORES.kerbA : CORES.kerbB;
       const forca = Math.min(1, (Math.abs(k1) - 1 / 150) * 200);
-      const largKerb = 0.9 + forca * 0.8;
+      const largKerb = 1.6;
 
       for (const lado of [ladoInterno, -ladoInterno]) {
         // o kerb externo só aparece nas curvas mais fortes
         if (lado !== ladoInterno && forca < 0.4) continue;
         const a = lado * meia;
+        const meioA = lado * (meia + 0.4);
         const b = lado * (meia + largKerb);
-        // topo do kerb ligeiramente elevado: dá volume sem geometria extra
-        const c1 = corComLuz(corKerb, l1 * 1.05, amb);
-        const c2 = corComLuz(corKerb, l2 * 1.05, amb);
-        addQuad(detalhe,
-          ponto(i, a, 0.02), ponto(i, b, 0.11), ponto(j, b, 0.11), ponto(j, a, 0.02),
-          c1, c1, c2, c2);
-        // face lateral escura: o bisel falso que dá relevo
-        const cs1 = corComLuz(corKerb, l1 * 0.42, amb);
-        addQuad(detalhe,
-          ponto(i, b, 0.11), ponto(i, b, 0), ponto(j, b, 0), ponto(j, b, 0.11),
-          cs1, cs1, cs1, cs1);
+
+        // Padrão FIA: faixas de 0,8 m alternando vermelho e branco. O segmento
+        // do traçado tem 8 m, então precisa ser SUBDIVIDIDO — pintar uma cor
+        // por segmento faz a alternância cair sempre na mesma paridade e o
+        // kerb inteiro sai de uma cor só.
+        const sub = 10;
+        for (let k = 0; k < sub; k++) {
+          const t0 = k / sub, t1 = (k + 1) / sub;
+          const sAqui = pista.s[i] + (pista.s[j] - pista.s[i] + (j === 0 ? pista.comprimento : 0)) * t0;
+          const corKerb = Math.floor(sAqui / 0.8) % 2 === 0 ? CORES.kerbA : CORES.kerbB;
+          const lerpP = (off: number, t: number, alt: number): [number, number, number] => [
+            pista.px[i] + (pista.px[j] - pista.px[i]) * t + (pista.nx[i] + (pista.nx[j] - pista.nx[i]) * t) * off,
+            pista.py[i] + (pista.py[j] - pista.py[i]) * t + alt,
+            pista.pz[i] + (pista.pz[j] - pista.pz[i]) * t + (pista.nz[i] + (pista.nz[j] - pista.nz[i]) * t) * off,
+          ];
+          const lz = l1 + (l2 - l1) * t0;
+          const c1 = corComLuz(corKerb, lz * 1.06, amb);
+          // rampa: 0 a 50 mm nos primeiros 40 cm, depois plano
+          addQuad(detalhe, lerpP(a, t0, 0.012), lerpP(meioA, t0, 0.05),
+            lerpP(meioA, t1, 0.05), lerpP(a, t1, 0.012), c1, c1, c1, c1);
+          addQuad(detalhe, lerpP(meioA, t0, 0.05), lerpP(b, t0, 0.055),
+            lerpP(b, t1, 0.055), lerpP(meioA, t1, 0.05), c1, c1, c1, c1);
+          // face lateral
+          const cs = corComLuz(corKerb, lz * 0.4, amb);
+          addQuad(detalhe, lerpP(b, t0, 0.055), lerpP(b, t0, -0.02),
+            lerpP(b, t1, -0.02), lerpP(b, t1, 0.055), cs, cs, cs, cs);
+        }
       }
     }
 
-    // ── Escapatória e terreno ───────────────────────────────────────────────
-    const inicioEscapatoria = meia + (emCurva ? 1.9 : 0.4);
-    const larguraEscapatoria = temMuros ? 1.6 : 16;
-    const larguraTerreno = temMuros ? 26 : 52;
+    // ── Escapatória: a sequência real de uma pista de F1 ───────────────────
+    // kerb → apron de asfalto → grama artificial → brita/grama → terreno.
+    // A faixa de grama artificial verde-saturado entre o kerb e a brita é um
+    // dos detalhes mais característicos e mais baratos de reproduzir: existe
+    // por segurança, e na TV vira uma linha verde inconfundível.
+    const largKerbAqui = emCurva ? 1.6 : 0;
+    const posApron = meia + largKerbAqui;
+    const largApron = emCurva ? 1.2 : 0.5;
+    const largArtificial = 1.5;
+    const largEscapatoria = temMuros ? 1.4 : 15;
+    const largTerreno = temMuros ? 26 : 50;
 
     for (const lado of [-1, 1]) {
-      const a = lado * inicioEscapatoria;
-      const b = lado * (inicioEscapatoria + larguraEscapatoria);
-      const corEsc = temMuros ? CORES.concreto : emCurva ? CORES.brita : CORES.grama;
-      const c1 = corComLuz(corEsc, l1 * 0.96, amb);
-      const c2 = corComLuz(corEsc, l2 * 0.96, amb);
-      addQuad(terreno, ponto(i, a, -0.04), ponto(i, b, -0.16), ponto(j, b, -0.16), ponto(j, a, -0.04), c1, c1, c2, c2);
+      const uv0 = pista.s[i] * ESCALA_UV, uv1 = (pista.s[i] + 8) * ESCALA_UV;
 
-      // terreno amplo, com faixas de corte de grama para dar escala
-      const c = lado * (inicioEscapatoria + larguraEscapatoria + larguraTerreno);
-      const listra = Math.floor(pista.s[i] / 26) % 2 === 0;
-      const corT = temMuros ? CORES.concreto : listra ? CORES.grama : CORES.gramaEscura;
-      const ct1 = corComLuz(corT, l1 * 0.9, amb);
-      const ct2 = corComLuz(corT, l2 * 0.9, amb);
-      addQuad(terreno, ponto(i, b, -0.16), ponto(i, c, -1.4), ponto(j, c, -1.4), ponto(j, b, -0.16), ct1, ct1, ct2, ct2);
+      // apron: asfalto liso logo depois do kerb
+      const a0 = lado * posApron;
+      const a1p = lado * (posApron + largApron);
+      const cA1 = corComLuz(CORES.asfaltoClaro, l1 * 0.98, amb);
+      const cA2 = corComLuz(CORES.asfaltoClaro, l2 * 0.98, amb);
+      addQuad(asfalto, ponto(i, a0, -0.01), ponto(i, a1p, -0.03), ponto(j, a1p, -0.03), ponto(j, a0, -0.01),
+        cA1, cA1, cA2, cA2, [a0 * ESCALA_UV, uv0, a1p * ESCALA_UV, uv1]);
+
+      // faixa de grama artificial
+      const b0 = a1p;
+      const b1p = lado * (posApron + largApron + largArtificial);
+      const cG1 = corComLuz(CORES.gramaArtificial, l1, amb);
+      const cG2 = corComLuz(CORES.gramaArtificial, l2, amb);
+      addQuad(grama, ponto(i, b0, -0.03), ponto(i, b1p, -0.05), ponto(j, b1p, -0.05), ponto(j, b0, -0.03),
+        cG1, cG1, cG2, cG2, [b0 * ESCALA_UV * 2, uv0 * 2, b1p * ESCALA_UV * 2, uv1 * 2]);
+
+      // escapatória: brita nas curvas, grama nas retas, concreto no urbano
+      const c0 = b1p;
+      const c1p = lado * (posApron + largApron + largArtificial + largEscapatoria);
+      const alvo = temMuros ? concreto : emCurva ? brita : grama;
+      const corEsc = temMuros ? CORES.concreto : emCurva ? CORES.brita : CORES.grama;
+      const cE1 = corComLuz(corEsc, l1 * 0.97, amb);
+      const cE2 = corComLuz(corEsc, l2 * 0.97, amb);
+      addQuad(alvo, ponto(i, c0, -0.05), ponto(i, c1p, -0.2), ponto(j, c1p, -0.2), ponto(j, c0, -0.05),
+        cE1, cE1, cE2, cE2, [c0 * ESCALA_UV, uv0, c1p * ESCALA_UV, uv1]);
+
+      // terreno amplo
+      const d0 = c1p;
+      const d1 = lado * (posApron + largApron + largArtificial + largEscapatoria + largTerreno);
+      const alvoT = temMuros ? concreto : grama;
+      const corT = temMuros ? CORES.concreto : CORES.grama;
+      const cT1 = corComLuz(corT, l1 * 0.88, amb);
+      const cT2 = corComLuz(corT, l2 * 0.88, amb);
+      addQuad(alvoT, ponto(i, d0, -0.2), ponto(i, d1, -1.5), ponto(j, d1, -1.5), ponto(j, d0, -0.2),
+        cT1, cT1, cT2, cT2, [d0 * ESCALA_UV * 0.5, uv0 * 0.5, d1 * ESCALA_UV * 0.5, uv1 * 0.5]);
     }
 
     // ── Muros dos circuitos de rua ──────────────────────────────────────────
@@ -218,17 +280,26 @@ export function gerarMundo(pista: Pista, hora: HoraDoDia): MundoGerado {
     }
   }
 
-  const matOpaco = new MeshBasicMaterial({ vertexColors: true, side: DoubleSide });
+  const tex = obterTexturas(renderer);
+  const mat = (map?: typeof tex.asfalto) => new MeshBasicMaterial({
+    vertexColors: true, side: DoubleSide, map: map ?? null,
+  });
+
   const grupo = new Group();
-  const meshTerreno = finalizar(terreno, matOpaco);
-  const meshAsfalto = finalizar(asfalto, matOpaco);
-  const meshDetalhe = finalizar(detalhe, new MeshBasicMaterial({ vertexColors: true, side: DoubleSide }));
-  meshTerreno.renderOrder = 0;
+  const meshGrama = finalizar(grama, mat(tex.grama));
+  const meshBrita = finalizar(brita, mat(tex.brita));
+  const meshConcreto = finalizar(concreto, mat(tex.concreto));
+  const meshAsfalto = finalizar(asfalto, mat(tex.asfalto));
+  const meshDetalhe = finalizar(detalhe, mat());
+  meshGrama.renderOrder = 0;
+  meshBrita.renderOrder = 0;
+  meshConcreto.renderOrder = 0;
   meshAsfalto.renderOrder = 1;
   meshDetalhe.renderOrder = 2;
-  grupo.add(meshTerreno, meshAsfalto, meshDetalhe);
+  grupo.add(meshGrama, meshBrita, meshConcreto, meshAsfalto, meshDetalhe);
 
-  const triangulos = (terreno.idx.length + asfalto.idx.length + detalhe.idx.length) / 3;
+  const triangulos = (grama.idx.length + brita.idx.length + concreto.idx.length
+    + asfalto.idx.length + detalhe.idx.length) / 3;
   return { grupo, triangulos };
 }
 

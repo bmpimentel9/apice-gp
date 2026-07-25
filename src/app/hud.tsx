@@ -12,6 +12,8 @@
  */
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react';
 import type { QuadroHUD } from '../game/core/game';
+import { Minimapa, type HandleMinimapa } from './minimapa';
+import type { Pista } from '../game/sim/track';
 import { PNEUS } from '../game/sim/constants';
 
 export interface HandleHUD {
@@ -37,9 +39,12 @@ interface Props {
   onFreioUp: () => void;
   onOvertake: () => void;
   canhoto: boolean;
+  pista: Pista | null;
+  corCircuito: string;
 }
 
-export function HUD({ refHandle, canhoto }: Props) {
+export function HUD({ refHandle, canhoto, pista, corCircuito }: Props) {
+  const miniRef = useRef<HandleMinimapa>(null);
   const velRef = useRef<HTMLSpanElement>(null);
   const marchaRef = useRef<HTMLSpanElement>(null);
   const tempoRef = useRef<HTMLSpanElement>(null);
@@ -80,9 +85,11 @@ export function HUD({ refHandle, canhoto }: Props) {
       }
 
       if (posRef.current) {
-        posRef.current.style.display = q.totalCarros > 1 ? 'flex' : 'none';
+        posRef.current.style.display = q.totalCarros > 1 ? 'block' : 'none';
         posRef.current.firstElementChild!.textContent = `P${q.posicao}`;
       }
+
+      miniRef.current?.atualizar(q.arco, q.proximaCurva?.distancia ?? 0);
 
       // aviso de curva — o chevron aparece antes de a curva entrar em tela
       const c = curvaRef.current;
@@ -213,9 +220,15 @@ export function HUD({ refHandle, canhoto }: Props) {
         position: 'absolute', top: 'calc(var(--seguro-topo) + 6px)', left: 10, right: 10,
         display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8,
       }}>
-        <div className="painel" style={{ padding: '6px 10px', minWidth: 62 }}>
-          <div style={{ fontSize: 9, color: 'var(--cor-suave)', letterSpacing: '0.09em' }}>VOLTA</div>
-          <span ref={voltaRef} className="num" style={{ fontSize: 19, fontWeight: 800 }}>1</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <div className="painel" style={{ padding: '5px 9px', minWidth: 58 }}>
+            <div style={{ fontSize: 8, color: 'var(--cor-suave)', letterSpacing: '0.09em' }}>VOLTA</div>
+            <span ref={voltaRef} className="num" style={{ fontSize: 17, fontWeight: 800 }}>1</span>
+          </div>
+          <div ref={posRef} className="painel" style={{ padding: '5px 9px', minWidth: 58, display: 'none' }}>
+            <div className="num" style={{ fontSize: 17, fontWeight: 800 }}>P1</div>
+            <div style={{ fontSize: 8, color: 'var(--cor-suave)', letterSpacing: '0.09em' }}>POSIÇÃO</div>
+          </div>
         </div>
 
         <div style={{ textAlign: 'center', flex: 1 }}>
@@ -232,18 +245,14 @@ export function HUD({ refHandle, canhoto }: Props) {
           </div>
         </div>
 
-        <div ref={posRef} className="painel" style={{
-          padding: '6px 10px', minWidth: 62, display: 'none',
-          flexDirection: 'column', alignItems: 'flex-end',
-        }}>
-          <div className="num" style={{ fontSize: 19, fontWeight: 800 }}>P1</div>
-          <div style={{ fontSize: 9, color: 'var(--cor-suave)', letterSpacing: '0.09em' }}>POSIÇÃO</div>
-        </div>
+        <div style={{ width: 74 }} />
       </div>
+
+      <Minimapa pista={pista} refHandle={miniRef} cor={corCircuito} />
 
       {/* ── Aviso de curva ───────────────────────────────────────────────── */}
       <div ref={curvaRef} style={{
-        position: 'absolute', top: 'calc(var(--seguro-topo) + 104px)', right: 14,
+        position: 'absolute', top: 'calc(var(--seguro-topo) + 88px)', right: 14,
         display: 'flex', alignItems: 'center', gap: 2, opacity: 0,
         transition: 'opacity 160ms', textShadow: '0 2px 10px rgba(0,0,0,.85)',
         fontWeight: 800,
