@@ -26,12 +26,12 @@ export interface Ambiente {
 
 export const AMBIENTES: Record<HoraDoDia, Ambiente> = {
   dia: {
-    ceuTopo: '#2E6FBE', ceuHorizonte: '#BEDCF2',
+    ceuTopo: '#1F5FB0', ceuHorizonte: '#AFD4EE',
     neblina: '#C3DCEE', neblinaDensidade: 0.0014,
     luz: 1.18, sol: [0.45, 0.82, 0.35], corLuz: '#FFF8EA', corSombra: '#7F93AE',
   },
   tarde: {
-    ceuTopo: '#16294F', ceuHorizonte: '#FF9E52',
+    ceuTopo: '#12344A', ceuHorizonte: '#FF8C3C',
     neblina: '#C9A187', neblinaDensidade: 0.0018,
     luz: 1.1, sol: [-0.72, 0.36, 0.28], corLuz: '#FFE3C4', corSombra: '#6E6389',
   },
