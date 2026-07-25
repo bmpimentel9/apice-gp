@@ -2,3 +2,5 @@ node_modules/
 .next/
 .vercel/
 .DS_Store
+out/
+captura-*.png

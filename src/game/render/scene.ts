@@ -1,0 +1,304 @@
+/**
+ * Renderizador: cena, câmera de perseguição e pós-processamento.
+ *
+ * A câmera é a peça mais importante do jogo em retrato. Numa tela 9:19,5 sobra
+ * pouca visão à frente, então ela faz três coisas ao mesmo tempo:
+ *  1. mantém o carro no terço inferior, liberando ~60% da tela para o que vem;
+ *  2. sobe e recua com a velocidade (o inverso do instinto de "aproximar para
+ *     dar velocidade"), abrindo campo de visão justamente quando há menos tempo
+ *     de reação;
+ *  3. antecipa a curva antes do comando do jogador, para que a curva apareça em
+ *     tela antes de chegar.
+ */
+import {
+  Scene, PerspectiveCamera, WebGLRenderer, FogExp2, Group, Vector3, Color,
+  DirectionalLight, AmbientLight, WebGLRenderTarget, OrthographicCamera,
+  ShaderMaterial, PlaneGeometry, Mesh, LinearFilter, SRGBColorSpace,
+} from 'three';
+import type { Pista } from '../sim/track';
+import type { EstadoCarro } from '../sim/car';
+import { gerarMundo, gerarCeu } from './world';
+import { criarCarro3D, type Carro3D } from './car3d';
+import { AMBIENTES, type HoraDoDia } from './palette';
+import { VEL_MAXIMA } from '../sim/constants';
+import type { Equipe } from '../data/teams';
+
+const fragPos = `
+  varying vec2 vUv;
+  void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+`;
+
+/**
+ * Passe único de pós-processamento. Vinheta, grading, linhas de velocidade e
+ * grão — na ordem de retorno por custo definida na direção de arte. Não há
+ * bloom multi-passe: o brilho vem de geometria aditiva, que custa uma fração.
+ */
+const fragCor = `
+  precision mediump float;
+  varying vec2 vUv;
+  uniform sampler2D tCena;
+  uniform float uVelocidade;   // 0..1
+  uniform float uIntensidade;  // 0..1, respeita "reduzir movimento"
+  uniform float uTempo;
+  uniform float uImpacto;      // pulso ao bater ou travar roda
+  uniform vec3 uTint;
+
+  void main() {
+    vec2 uv = vUv;
+    vec2 centro = vec2(0.5, 0.42);
+    vec2 dir = uv - centro;
+    float dist = length(dir);
+
+    // aberração cromática só na velocidade — nunca constante
+    float ab = uVelocidade * uIntensidade * 0.0055 + uImpacto * 0.01;
+    vec3 cor;
+    cor.r = texture2D(tCena, uv - dir * ab).r;
+    cor.g = texture2D(tCena, uv).g;
+    cor.b = texture2D(tCena, uv + dir * ab).b;
+
+    // linhas de velocidade nas bordas
+    float bordas = smoothstep(0.28, 0.72, dist);
+    float estrias = sin(atan(dir.y, dir.x) * 46.0 + uTempo * 34.0) * 0.5 + 0.5;
+    cor += vec3(estrias * bordas * uVelocidade * uVelocidade * uIntensidade * 0.1);
+
+    // vinheta dinâmica: fecha com a velocidade
+    float vinheta = 1.0 - dist * (0.34 + uVelocidade * 0.36 * uIntensidade);
+    cor *= clamp(vinheta, 0.0, 1.0);
+
+    // grading
+    cor = mix(cor, cor * uTint, 0.14);
+    cor = pow(max(cor, 0.0), vec3(0.9));
+    cor *= 1.1;
+
+    // grão sutil, disfarça o banding dos gradientes
+    float g = fract(sin(dot(uv * vec2(1.0 + uTempo * 0.0001, 1.0), vec2(12.9898, 78.233))) * 43758.5453);
+    cor += (g - 0.5) * 0.022;
+
+    gl_FragColor = vec4(cor, 1.0);
+  }
+`;
+
+export interface OpcoesRender {
+  reduzirMovimento: boolean;
+  qualidade: number; // 0..1
+}
+
+export class Renderizador {
+  readonly cena = new Scene();
+  readonly camera: PerspectiveCamera;
+  readonly renderer: WebGLRenderer;
+  private alvoRT: WebGLRenderTarget;
+  private cenaPos = new Scene();
+  private cameraPos = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  private matPos: ShaderMaterial;
+  private mundo?: Group;
+  private ceu?: Mesh;
+  private carros = new Map<string, Carro3D>();
+  private pista?: Pista;
+  private hora: HoraDoDia = 'dia';
+
+  // estado suavizado da câmera
+  private camPos = new Vector3();
+  private camAlvo = new Vector3();
+  private iniciada = false;
+  private tempo = 0;
+  private impacto = 0;
+  opcoes: OpcoesRender = { reduzirMovimento: false, qualidade: 1 };
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.renderer = new WebGLRenderer({
+      canvas, antialias: false, powerPreference: 'high-performance',
+      alpha: false, stencil: false, depth: true,
+    });
+    this.renderer.outputColorSpace = SRGBColorSpace;
+    this.renderer.setClearColor(0x0a0e18, 1);
+
+    this.camera = new PerspectiveCamera(62, 1, 0.4, 4600);
+
+    // uma luz direcional só, para os carros — a cena estática é assada
+    const sol = new DirectionalLight(0xfff4e0, 2.1);
+    sol.position.set(60, 120, 40);
+    this.cena.add(sol);
+    this.cena.add(new AmbientLight(0x8ea6c8, 1.5));
+
+    this.alvoRT = new WebGLRenderTarget(2, 2, { minFilter: LinearFilter, magFilter: LinearFilter, depthBuffer: true });
+    this.matPos = new ShaderMaterial({
+      vertexShader: fragPos,
+      fragmentShader: fragCor,
+      uniforms: {
+        tCena: { value: this.alvoRT.texture },
+        uVelocidade: { value: 0 },
+        uIntensidade: { value: 1 },
+        uTempo: { value: 0 },
+        uImpacto: { value: 0 },
+        uTint: { value: new Color(1, 1, 1) },
+      },
+      depthTest: false, depthWrite: false,
+    });
+    this.cenaPos.add(new Mesh(new PlaneGeometry(2, 2), this.matPos));
+  }
+
+  carregarPista(pista: Pista, hora: HoraDoDia) {
+    if (this.mundo) { this.cena.remove(this.mundo); this.descartar(this.mundo); }
+    if (this.ceu) { this.cena.remove(this.ceu); }
+    this.pista = pista;
+    this.hora = hora;
+    const amb = AMBIENTES[hora];
+    const { grupo } = gerarMundo(pista, hora);
+    this.mundo = grupo;
+    this.cena.add(grupo);
+    this.ceu = gerarCeu(hora);
+    this.cena.add(this.ceu);
+    this.cena.fog = new FogExp2(new Color(amb.neblina).getHex(), amb.neblinaDensidade);
+    this.renderer.setClearColor(new Color(amb.neblina).getHex(), 1);
+    this.matPos.uniforms.uTint.value = new Color(amb.corLuz);
+    this.iniciada = false;
+  }
+
+  garantirCarro(id: string, equipe: Equipe, numero: number) {
+    let c = this.carros.get(id);
+    if (!c) {
+      c = criarCarro3D(equipe, numero);
+      this.carros.set(id, c);
+      this.cena.add(c.grupo);
+    }
+    return c;
+  }
+
+  removerCarrosExceto(ids: Set<string>) {
+    for (const [id, c] of this.carros) {
+      if (!ids.has(id)) {
+        this.cena.remove(c.grupo);
+        this.descartar(c.grupo);
+        this.carros.delete(id);
+      }
+    }
+  }
+
+  /** Posiciona um carro na cena a partir do estado da simulação. */
+  atualizarCarro(id: string, estado: EstadoCarro, visivel = true) {
+    const c = this.carros.get(id);
+    if (!c) return;
+    c.grupo.visible = visivel;
+    if (!visivel) return;
+    c.grupo.position.set(estado.x, estado.y, estado.z);
+    c.grupo.rotation.y = estado.yaw;
+    c.definirEsterco(estado.esterco * 1.6);
+    c.definirModoAero(estado.modoAero === 'reta');
+    const mergulho = Math.max(-0.035, Math.min(0.05, -estado.gForceLong * 0.014));
+    const rolagem = Math.max(-0.05, Math.min(0.05, estado.gForceLat * 0.012));
+    c.definirInclinacao(mergulho, rolagem);
+    // giro das rodas
+    const giro = (estado.velocidade / 0.36) * 0.016;
+    for (const r of c.rodas) r.children[0].rotation.x -= giro;
+  }
+
+  pulsoImpacto(forca = 1) { this.impacto = Math.min(1, this.impacto + forca); }
+
+  /**
+   * Atualiza a câmera de perseguição. `dt` real para suavização independente
+   * de taxa de quadros.
+   */
+  atualizarCamera(estado: EstadoCarro, dt: number) {
+    const pista = this.pista;
+    if (!pista) return;
+    const frac = Math.min(1, estado.velocidade / VEL_MAXIMA);
+
+    // A câmera sobe e recua com a velocidade — abre o campo de visão quando o
+    // tempo de reação encolhe.
+    const recuo = 9.8 + frac * 5.6;
+    const altura = 4.3 + frac * 1.7;
+
+    const dirX = Math.sin(estado.yaw), dirZ = Math.cos(estado.yaw);
+    const alvoPos = new Vector3(
+      estado.x - dirX * recuo,
+      estado.y + altura,
+      estado.z - dirZ * recuo,
+    );
+
+    // A mira parte do CARRO e segue uma direção — não a posição absoluta da
+    // pista. Mirar no traçado desloca o carro para o canto da tela sempre que
+    // ele não está exatamente no centro da pista, que é quase sempre.
+    const adiante = pista.amostrar(estado.s + 30 + frac * 55);
+    const mistX = dirX * 0.42 + adiante.tx * 0.58;
+    const mistZ = dirZ * 0.42 + adiante.tz * 0.58;
+    const norma = Math.hypot(mistX, mistZ) || 1;
+    const distMira = 21 + frac * 16;
+
+    // A mira fica BAIXA: é o que inclina a câmera para o chão e empurra o
+    // horizonte para o terço superior, liberando tela para a pista à frente.
+    const mira = new Vector3(
+      estado.x + (mistX / norma) * distMira,
+      estado.y + 0.15,
+      estado.z + (mistZ / norma) * distMira,
+    );
+
+    if (!this.iniciada) {
+      this.camPos.copy(alvoPos);
+      this.camAlvo.copy(mira);
+      this.iniciada = true;
+    } else {
+      // suavização exponencial independente de framerate
+      const kp = 1 - Math.exp(-dt / 0.1);
+      const ka = 1 - Math.exp(-dt / 0.16);
+      this.camPos.lerp(alvoPos, kp);
+      this.camAlvo.lerp(mira, ka);
+    }
+
+    this.camera.position.copy(this.camPos);
+    this.camera.lookAt(this.camAlvo);
+
+    // FOV cresce com a velocidade: o truque mais barato de sensação de rapidez
+    const fovAlvo = 60 + frac * 16 + (estado.overtakeAtivo ? 4 : 0);
+    this.camera.fov += (fovAlvo - this.camera.fov) * (1 - Math.exp(-dt / 0.25));
+
+    // tremor: kerb, escorregamento e impacto
+    if (!this.opcoes.reduzirMovimento) {
+      const tremor = (estado.foraDaPista ? 0.05 : 0) + estado.derrapando * 0.035 + this.impacto * 0.22;
+      if (tremor > 0.001) {
+        this.camera.position.x += (Math.random() - 0.5) * tremor;
+        this.camera.position.y += (Math.random() - 0.5) * tremor;
+      }
+    }
+    this.camera.updateProjectionMatrix();
+
+    if (this.ceu) this.ceu.position.set(this.camera.position.x, 0, this.camera.position.z);
+
+    this.matPos.uniforms.uVelocidade.value = frac;
+    this.matPos.uniforms.uImpacto.value = this.impacto;
+    this.matPos.uniforms.uIntensidade.value = this.opcoes.reduzirMovimento ? 0.25 : 1;
+    this.impacto *= Math.exp(-dt / 0.13);
+  }
+
+  redimensionar(largura: number, altura: number, dpr: number) {
+    this.renderer.setPixelRatio(dpr);
+    this.renderer.setSize(largura, altura, false);
+    this.camera.aspect = largura / altura;
+    this.camera.updateProjectionMatrix();
+    const escala = this.opcoes.qualidade;
+    this.alvoRT.setSize(Math.max(2, Math.floor(largura * dpr * escala)), Math.max(2, Math.floor(altura * dpr * escala)));
+  }
+
+  desenhar(dt: number) {
+    this.tempo += dt;
+    this.matPos.uniforms.uTempo.value = this.tempo;
+    this.renderer.setRenderTarget(this.alvoRT);
+    this.renderer.render(this.cena, this.camera);
+    this.renderer.setRenderTarget(null);
+    this.renderer.render(this.cenaPos, this.cameraPos);
+  }
+
+  private descartar(obj: Group | Mesh) {
+    obj.traverse((o) => {
+      const m = o as Mesh;
+      if (m.geometry) m.geometry.dispose();
+      const mat = m.material as { dispose?: () => void } | undefined;
+      if (mat?.dispose) mat.dispose();
+    });
+  }
+
+  destruir() {
+    this.alvoRT.dispose();
+    this.renderer.dispose();
+  }
+}
