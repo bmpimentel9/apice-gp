@@ -134,27 +134,41 @@ export const ESTERCO_FATOR_MINIMO = 0.26;
 export const ESTERCO_SUAVIZACAO = 0.11; // s
 
 // ── Assistências ─────────────────────────────────────────────────────────────
+/**
+ * O carro segue o traçado sozinho e toda a habilidade fica no freio.
+ *
+ * Essa é a decisão central do jogo. Num celular em pé, pedir que o jogador
+ * mantenha o carro na pista COM o polegar e ainda acerte o ponto de frenagem é
+ * pedir duas coisas difíceis ao mesmo tempo — e o resultado é sair da pista na
+ * primeira curva. Com o traçado assistido, o arraste deixa de ser volante e
+ * passa a ser POSIÇÃO NA PISTA (para escolher a linha, atacar ou defender), e o
+ * freio vira o único verbo de habilidade: frear tarde demais faz o carro correr
+ * largo e perder tempo; frear cedo perde tempo também; soltar devagar dá
+ * rotação extra na entrada. Piso baixo, teto alto, uma mão só.
+ */
 export interface Assistencias {
+  /** 0 = volante direto. 1 = o carro segue a linha sozinho. */
+  tracadoAutomatico: number;
   linhaDeCorrida: boolean;
   freioAssistido: boolean;
   controleEstabilidade: boolean;
 }
 
 export const NIVEIS: Record<string, Assistencias & { nome: string; descricao: string }> = {
-  iniciante: {
-    nome: 'Iniciante',
-    descricao: 'Linha de corrida, ABS e correção de traçado',
-    linhaDeCorrida: true, freioAssistido: true, controleEstabilidade: true,
+  automatico: {
+    nome: 'Automático',
+    descricao: 'O carro segue o traçado. Você freia e ultrapassa',
+    tracadoAutomatico: 1, linhaDeCorrida: true, freioAssistido: true, controleEstabilidade: true,
   },
-  intermediario: {
-    nome: 'Intermediário',
-    descricao: 'Linha de corrida e ABS. Sem correção',
-    linhaDeCorrida: true, freioAssistido: true, controleEstabilidade: false,
+  assistido: {
+    nome: 'Assistido',
+    descricao: 'Traçado com ajuda. Você corrige e freia',
+    tracadoAutomatico: 0.72, linhaDeCorrida: true, freioAssistido: true, controleEstabilidade: true,
   },
-  profissional: {
-    nome: 'Profissional',
-    descricao: 'Você contra a pista. Sem nada',
-    linhaDeCorrida: false, freioAssistido: false, controleEstabilidade: false,
+  piloto: {
+    nome: 'Piloto',
+    descricao: 'Volante nas suas mãos. Sem rede',
+    tracadoAutomatico: 0, linhaDeCorrida: false, freioAssistido: false, controleEstabilidade: false,
   },
 };
 

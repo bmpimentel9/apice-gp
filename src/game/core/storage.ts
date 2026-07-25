@@ -37,7 +37,7 @@ export interface DadosSalvos {
 const PADRAO: DadosSalvos = {
   recordes: {},
   prefs: {
-    assistencia: 'intermediario',
+    assistencia: 'automatico',
     canhoto: false,
     modoBotoes: false,
     sensibilidade: 1,

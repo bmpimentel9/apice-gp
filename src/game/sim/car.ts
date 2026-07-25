@@ -305,7 +305,11 @@ export function passoFisica(estado: EstadoCarro, entrada: EntradaControle, ctx: 
 
   // ── Muros ──────────────────────────────────────────────────────────────────
   estado.colidiuAgora = false;
-  const limiteMuro = pista.largura / 2 + (ctx.temMuros ? 2.2 : 14);
+  // Nos circuitos de rua o muro fica um pouco mais afastado do que na
+  // realidade. É licença deliberada: com o traçado assistido e um polegar só,
+  // muro colado transforma cada erro pequeno em batida, e o jogo deixa de ser
+  // divertido muito antes de deixar de ser fiel.
+  const limiteMuro = pista.largura / 2 + (ctx.temMuros ? 3.4 : 14);
   if (Math.abs(proj.lateral) > limiteMuro) {
     const sinal = Math.sign(proj.lateral);
     const sobra = Math.abs(proj.lateral) - limiteMuro;

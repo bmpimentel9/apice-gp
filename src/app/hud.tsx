@@ -54,6 +54,10 @@ export function HUD({ refHandle, canhoto }: Props) {
   const avisoRef = useRef<HTMLDivElement>(null);
   const rpmRef = useRef<SVGCircleElement>(null);
   const luzesRef = useRef<HTMLDivElement>(null);
+  const freioRef = useRef<HTMLDivElement>(null);
+  const anelFreioRef = useRef<SVGCircleElement>(null);
+  const notaRef = useRef<HTMLDivElement>(null);
+  const posPistaRef = useRef<HTMLDivElement>(null);
 
   useImperativeHandle(refHandle, () => ({
     atualizar(q: QuadroHUD) {
@@ -122,6 +126,54 @@ export function HUD({ refHandle, canhoto }: Props) {
         const circ = 2 * Math.PI * 30;
         rpmRef.current.style.strokeDashoffset = String(circ * (1 - q.rpm));
         rpmRef.current.style.stroke = q.rpm > 0.93 ? 'var(--cor-vermelho)' : 'var(--cor-destaque)';
+      }
+
+      // ── Aviso de frenagem: o coração do jogo ──────────────────────────
+      // O botão acende e cresce conforme a curva exige freio. É o que ensina o
+      // ponto de frenagem sem tutorial nenhum.
+      if (freioRef.current && anelFreioRef.current) {
+        const n = q.freioNecessario;
+        const el = freioRef.current;
+        if (n > 0.02) {
+          const cor = q.freioAtrasado ? '#e2241b' : n > 0.3 ? '#ff8000' : '#f5c518';
+          el.style.borderColor = cor;
+          el.style.background = `rgba(226,36,27,${0.14 + n * 0.3})`;
+          el.style.transform = `scale(${1 + n * 0.11})`;
+          el.style.boxShadow = `0 0 ${10 + n * 26}px ${n * 6}px ${cor}66`;
+          anelFreioRef.current.style.stroke = cor;
+          anelFreioRef.current.style.opacity = '1';
+        } else {
+          el.style.borderColor = 'rgba(255,255,255,0.22)';
+          el.style.background = 'rgba(226,36,27,0.12)';
+          el.style.transform = 'scale(1)';
+          el.style.boxShadow = 'none';
+          anelFreioRef.current.style.opacity = '0.55';
+        }
+      }
+
+      // nota da curva, logo depois de passar por ela
+      if (notaRef.current) {
+        const n = q.notaCurva;
+        if (n && n.idade < 1.1) {
+          const rotulos: Record<string, [string, string]> = {
+            perfeito: ['PERFEITO', '#21c45d'],
+            bom: ['BOM', '#c6f135'],
+            tarde: ['TARDE DEMAIS', '#e2241b'],
+            cedo: ['CEDO DEMAIS', '#f5c518'],
+          };
+          const [txt, cor] = rotulos[n.qualidade] ?? ['', '#fff'];
+          notaRef.current.textContent = txt;
+          notaRef.current.style.color = cor;
+          notaRef.current.style.opacity = String(Math.max(0, 1 - n.idade / 1.1));
+          notaRef.current.style.transform = `translateX(-50%) translateY(${-n.idade * 14}px)`;
+        } else {
+          notaRef.current.style.opacity = '0';
+        }
+      }
+
+      // posição do carro na largura da pista
+      if (posPistaRef.current) {
+        posPistaRef.current.style.transform = `translateX(${q.posicaoNaPista * 26}px)`;
       }
 
       // avisos contextuais
@@ -260,12 +312,22 @@ export function HUD({ refHandle, canhoto }: Props) {
       </div>
 
       {/* ── Botão de freio: onde o polegar já está ───────────────────────── */}
-      <div style={{
-        position: 'absolute', bottom: 'calc(var(--seguro-base) + 24px)',
-        [ladoFreio]: 26, width: 92, height: 92, pointerEvents: 'none',
-      } as React.CSSProperties}>
-        <svg width="92" height="92" viewBox="0 0 92 92" style={{ position: 'absolute', inset: 0 }}>
-          <circle cx="46" cy="46" r="30" fill="rgba(226,36,27,0.16)" stroke="rgba(255,255,255,0.22)" strokeWidth="2" />
+      <div
+        ref={freioRef}
+        style={{
+          position: 'absolute', bottom: 'calc(var(--seguro-base) + 24px)',
+          [ladoFreio]: 26, width: 92, height: 92, pointerEvents: 'none',
+          borderRadius: '50%', border: '2px solid rgba(255,255,255,0.22)',
+          background: 'rgba(226,36,27,0.12)',
+          transition: 'background 90ms linear, box-shadow 90ms linear, transform 90ms ease-out, border-color 90ms',
+        } as React.CSSProperties}
+      >
+        <svg width="92" height="92" viewBox="0 0 92 92" style={{ position: 'absolute', inset: -2 }}>
+          <circle
+            ref={anelFreioRef} cx="46" cy="46" r="38" fill="none"
+            stroke="var(--cor-destaque)" strokeWidth="2.5" opacity="0.55"
+            strokeDasharray="4 7"
+          />
           <circle
             ref={rpmRef} cx="46" cy="46" r="30" fill="none"
             stroke="var(--cor-destaque)" strokeWidth="4" strokeLinecap="round"
@@ -283,6 +345,27 @@ export function HUD({ refHandle, canhoto }: Props) {
             <div style={{ fontSize: 9, opacity: 0.75 }}>FREIO</div>
           </div>
         </div>
+      </div>
+
+      {/* ── Nota da curva ────────────────────────────────────────────────── */}
+      <div ref={notaRef} className="num" style={{
+        position: 'absolute', bottom: 'calc(var(--seguro-base) + 210px)', left: '50%',
+        transform: 'translateX(-50%)', fontSize: 15, fontWeight: 900,
+        letterSpacing: '0.14em', opacity: 0, pointerEvents: 'none',
+        textShadow: '0 2px 10px rgba(0,0,0,.9)',
+      }} />
+
+      {/* ── Onde estou na largura da pista ───────────────────────────────── */}
+      <div style={{
+        position: 'absolute', bottom: 'calc(var(--seguro-base) + 100px)',
+        left: '50%', transform: 'translateX(-50%)', width: 64, height: 3,
+        borderRadius: 2, background: 'rgba(255,255,255,0.14)',
+      }}>
+        <div ref={posPistaRef} style={{
+          position: 'absolute', top: -2, left: 29, width: 7, height: 7,
+          borderRadius: '50%', background: 'var(--cor-destaque)',
+          transition: 'transform 90ms linear',
+        }} />
       </div>
 
       {/* ── Overtake Mode ────────────────────────────────────────────────── */}

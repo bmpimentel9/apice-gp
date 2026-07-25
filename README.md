@@ -21,21 +21,36 @@ Dois modos, um verbo só:
 
 Seis circuitos com traçado e elevação reais, sob nomes de homenagem.
 
-## Por que retrato
+## Como se joga
 
-Praticamente nenhum jogo de corrida sério é jogado em pé, porque a tela vertical
-dá pouca visão à frente. Essa restrição definiu o projeto inteiro:
+**O carro segue o traçado. Você decide o freio.**
 
-- **Acelerador automático.** Num celular, cada polegar ocupado custa caro. Numa
-  F1 o skill não está em segurar o acelerador — está em *onde você freia*.
-- **Um verbo: frear e soltar.** O ponto de frenagem é *quando* você solta; o
-  trail braking é *quão gradual*. Um botão, piso baixo, teto alto.
-- **Direção por arraste relativo.** Qualquer toque na metade inferior ancora um
-  ponto zero; o deslocamento comanda a curva. Funciona para destro e canhoto, e
-  sobrevive ao dedo deslizando no meio da curva.
-- **Aviso de curva estilo rali.** Um chevron numerado por severidade aparece
-  segundos antes de a curva entrar em tela. Em retrato, prever vale mais que
-  enxergar.
+Essa é a decisão central, e ela veio de uma versão anterior que não funcionava:
+com o volante nas mãos do jogador, o carro saía na primeira curva e o jogo era
+injogável em retrato. Pedir que alguém mantenha um F1 na pista com o polegar
+*e* acerte o ponto de frenagem é pedir duas coisas difíceis ao mesmo tempo.
+
+Então o polegar deixou de ser volante e virou **posição na pista** — escolher a
+linha, atacar por dentro, defender por fora. E toda a habilidade foi para o
+freio:
+
+- **Frear tarde demais** faz o carro correr largo e perder a curva.
+- **Frear cedo demais** custa velocidade que não volta. Nos testes, isso sai por
+  até 5 segundos por volta.
+- **Não frear** custa de 2 a 13 segundos, dependendo do circuito.
+- **Soltar devagar** transfere carga à frente e dá rotação extra na entrada —
+  trail braking, com um botão só.
+
+O botão de freio acende e cresce conforme a curva se aproxima, e a cada curva o
+jogo dá a nota: *perfeito*, *bom*, *tarde demais*, *cedo demais*. Não existe
+tutorial: o botão é o professor.
+
+Três níveis: **Automático** (o traçado é todo do carro), **Assistido** (você
+corrige) e **Piloto** (volante direto, sem rede).
+
+Um aviso de curva estilo rali — chevron numerado por severidade — aparece
+segundos antes de a curva entrar em tela. Em retrato, prever vale mais que
+enxergar.
 
 ## Autenticidade 2026
 
@@ -96,6 +111,7 @@ npm run test          # suíte completa
 npm run test:pistas   # traçados vs. tempos e velocidades reais
 npm run test:fisica   # o piloto virtual completa voltas em todos os circuitos
 npm run test:fantasma # ida e volta do fantasma pela URL
+npm run test:assistencia # o carro dá a volta sozinho e o freio decide o tempo
 npm run test:browser  # Chrome headless: render, WebGL e dirigibilidade
 npm run test:gp       # largada, IA e classificação
 ```

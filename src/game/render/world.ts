@@ -247,8 +247,12 @@ export function gerarCeu(hora: HoraDoDia) {
     const y2 = Math.sin((f2 * Math.PI) / 2) * raio * 0.85 - raio * 0.06;
     const r1 = Math.cos((f1 * Math.PI) / 2) * raio;
     const r2 = Math.cos((f2 * Math.PI) / 2) * raio;
-    const cor1 = horizonte.clone().lerp(topo, f1 ** 0.75);
-    const cor2 = horizonte.clone().lerp(topo, f2 ** 0.75);
+    // O expoente comprime o gradiente para perto do horizonte. Com a câmera a
+    // 4 m do chão, os anéis altos da esfera ficam fora do campo de visão — e
+    // com um gradiente linear o jogador só via a cor do horizonte, perdendo
+    // todo o drama do céu.
+    const cor1 = horizonte.clone().lerp(topo, f1 ** 0.32);
+    const cor2 = horizonte.clone().lerp(topo, f2 ** 0.32);
     const t1: [number, number, number] = [cor1.r, cor1.g, cor1.b];
     const t2: [number, number, number] = [cor2.r, cor2.g, cor2.b];
     for (let s = 0; s < segmentos; s++) {
