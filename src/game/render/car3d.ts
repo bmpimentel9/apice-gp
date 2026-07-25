@@ -97,7 +97,7 @@ const BITOLA_DIANT = 1.56;
 const BITOLA_TRAS = 1.5;
 
 /** Roda com aro de 18": cilindro de 16 lados, que já não denuncia low-poly. */
-function criarRoda(diametro: number, largura: number, corAro: Color) {
+function criarRoda(diametro: number, largura: number, corAro: Color, fantasma = false) {
   const m = new Malha();
   const lados = 16;
   const r = diametro / 2;
@@ -126,12 +126,14 @@ function criarRoda(diametro: number, largura: number, corAro: Color) {
     m.face([[meia * 0.96, ya1, za1], [meia * 0.96, ya2, za2], [0, ya2 * 0.2, za2 * 0.2], [0, ya1 * 0.2, za1 * 0.2]], corAro);
     m.face([[-meia * 0.96, ya2, za2], [-meia * 0.96, ya1, za1], [0, ya1 * 0.2, za1 * 0.2], [0, ya2 * 0.2, za2 * 0.2]], corAro);
   }
-  const mesh = new Mesh(m.geometria(), new MeshLambertMaterial({ vertexColors: true }));
+  const mesh = new Mesh(m.geometria(), fantasma
+    ? new MeshBasicMaterial({ color: 0xc0b0e8, transparent: true, opacity: 0.24, depthWrite: false })
+    : new MeshLambertMaterial({ vertexColors: true }));
   mesh.frustumCulled = false;
   return mesh;
 }
 
-export function criarCarro3D(equipe: Equipe, numero: number): Carro3D {
+export function criarCarro3D(equipe: Equipe, numero: number, fantasma = false): Carro3D {
   const cor = new Color(equipe.cor);
   const cor2 = new Color(equipe.corSecundaria);
   const escuro = cor.clone().multiplyScalar(0.42);
@@ -233,23 +235,34 @@ export function criarCarro3D(equipe: Equipe, numero: number): Carro3D {
    * reflexo nítido do céu (via environment map) e separa "carro pintado" de
    * "bloco colorido".
    */
-  const meshCorpo = new Mesh(corpo.geometria(), new MeshPhysicalMaterial({
-    vertexColors: true,
-    metalness: 0.45,
-    roughness: 0.34,
-    clearcoat: 0.9,
-    clearcoatRoughness: 0.12,
-    envMapIntensity: 1.15,
-  }));
+  /**
+   * O fantasma é uma referência, não um obstáculo: precisa ser lido de relance
+   * e sumir do caminho do olho. Material claro e translúcido, sem reflexo e sem
+   * escrever no buffer de profundidade — assim nunca esconde a pista à frente.
+   */
+  const materialCorpo = fantasma
+    ? new MeshBasicMaterial({
+        color: 0xd8c8ff, transparent: true, opacity: 0.3,
+        depthWrite: false, side: DoubleSide,
+      })
+    : new MeshPhysicalMaterial({
+        vertexColors: true,
+        metalness: 0.45,
+        roughness: 0.34,
+        clearcoat: 0.9,
+        clearcoatRoughness: 0.12,
+        envMapIntensity: 1.15,
+      });
+  const meshCorpo = new Mesh(corpo.geometria(), materialCorpo);
   meshCorpo.frustumCulled = false;
 
   // ── Flap ativo da asa traseira (abre em Straight Mode) ──────────────────
   const flapMalha = new Malha();
   flapMalha.placa(-0.13, 0.13, 0.93, -0.02, -0.01, 0.024, cor);
   flapMalha.placa(-0.13, 0.13, 0.91, 0.06, 0.07, 0.022, cor2);
-  const flap = new Mesh(flapMalha.geometria(), new MeshPhysicalMaterial({
-    vertexColors: true, metalness: 0.45, roughness: 0.34, clearcoat: 0.9,
-  }));
+  const flap = new Mesh(flapMalha.geometria(), fantasma
+    ? new MeshBasicMaterial({ color: 0xd8c8ff, transparent: true, opacity: 0.3, depthWrite: false })
+    : new MeshPhysicalMaterial({ vertexColors: true, metalness: 0.45, roughness: 0.34, clearcoat: 0.9 }));
   flap.position.set(0, 1.0, -2.74);
   flap.frustumCulled = false;
 
@@ -264,7 +277,7 @@ export function criarCarro3D(equipe: Equipe, numero: number): Carro3D {
   ];
   for (const [x, z, diant] of posRodas) {
     const g = new Group();
-    g.add(criarRoda(diant ? PNEU_D_DIANT : PNEU_D_TRAS, diant ? PNEU_L_DIANT : PNEU_L_TRAS, aro));
+    g.add(criarRoda(diant ? PNEU_D_DIANT : PNEU_D_TRAS, diant ? PNEU_L_DIANT : PNEU_L_TRAS, aro, fantasma));
     g.position.set(x, (diant ? PNEU_D_DIANT : PNEU_D_TRAS) / 2, z);
     grupo.add(g);
     rodas.push(g);
@@ -281,7 +294,7 @@ export function criarCarro3D(equipe: Equipe, numero: number): Carro3D {
   sombraMesh.renderOrder = 3;
 
   const sombra = new Group();
-  sombra.add(sombraMesh);
+  if (!fantasma) sombra.add(sombraMesh);
   // achata no chão e desloca na direção oposta ao sol
   sombra.scale.set(1.04, 0.001, 1.04);
   sombra.position.set(0.5, 0.018, -0.35);
@@ -295,7 +308,8 @@ export function criarCarro3D(equipe: Equipe, numero: number): Carro3D {
   contato.position.y = 0.012;
   contato.scale.set(1, 1.95, 1);
   contato.renderOrder = 2;
-  sombra.add(contato);
+  if (!fantasma) sombra.add(contato);
+  if (fantasma) meshCorpo.renderOrder = 6;
 
   const chassi = new Group();
   chassi.add(meshCorpo, flap);

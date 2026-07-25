@@ -117,6 +117,39 @@ function geoMuroPneus(amb: number) {
   return c.geometria();
 }
 
+/**
+ * Poste de catch fence — o objeto mais importante do cenário para a sensação
+ * de velocidade.
+ *
+ * A percepção de velocidade vem do fluxo óptico: a velocidade angular de um
+ * objeto no campo de visão é proporcional a 1/distância. Um poste a 3 m varre a
+ * tela numa fração de segundo; o mesmo poste a 30 m mal se move, na MESMA
+ * velocidade real. Nenhum efeito de tela substitui isso — é por falta de
+ * geometria próxima que 300 km/h acaba parecendo 150.
+ */
+function geoPosteFence(amb: number, alto: boolean) {
+  const c = new Construtor();
+  const metal = new Color('#8A9099').multiplyScalar(amb);
+  const alturaP = alto ? 3.3 : 1.15;
+  c.caixa(0.12, alturaP, 0.12, metal, 0);
+  // base de concreto: dá peso e sombra de contato
+  c.caixa(0.34, 0.22, 0.34, new Color('#8E8E86').multiplyScalar(amb), 0);
+  // cabos horizontais, sugeridos por barras finas
+  const cabo = new Color('#6E747C').multiplyScalar(amb);
+  const níveis = alto ? [1.0, 2.0, 3.0] : [0.5, 1.0];
+  for (const h of níveis) c.caixa(0.05, 0.05, 2.6, cabo, h, 1);
+  return c.geometria();
+}
+
+/** Marcador rente à pista: o "estroboscópio" lateral que mede a velocidade. */
+function geoMarcador(amb: number, vermelho: boolean) {
+  const c = new Construtor();
+  const cor = new Color(vermelho ? '#D81E2C' : '#F0EEE6').multiplyScalar(amb);
+  c.caixa(0.1, 0.62, 0.1, new Color('#9AA0A8').multiplyScalar(amb), 0);
+  c.caixa(0.3, 0.34, 0.12, cor, 0.55, 1);
+  return c.geometria();
+}
+
 /** Placa de distância de frenagem: um poste com o número. */
 function geoPlaca(amb: number, nivel: number) {
   const c = new Construtor();
@@ -170,6 +203,9 @@ export function gerarCenario(pista: Pista, hora: HoraDoDia): Group {
   const postes: Instancia[] = [];
   const pneus: Instancia[] = [];
   const placas: Array<Instancia & { nivel: number }> = [];
+  const postesFence: Instancia[] = [];
+  const postesFenceAlto: Instancia[] = [];
+  const marcadores: Array<Instancia & { vermelho: boolean }> = [];
 
   const meia = pista.largura / 2;
   const n = pista.n;
@@ -232,6 +268,43 @@ export function gerarCenario(pista: Pista, hora: HoraDoDia): Group {
     void s;
   }
 
+  // ── Fluxo óptico: geometria PRÓXIMA da pista ────────────────────────────
+  // Passo de ~17 m, a 2,4-3,6 m da borda. É o item de maior impacto na
+  // sensação de velocidade de todo o projeto.
+  {
+    const passoM = 17;
+    const passoIdx = Math.max(1, Math.round(passoM / (pista.comprimento / n)));
+    for (let i = 0; i < n; i += passoIdx) {
+      const curvaForte = Math.abs(pista.curvatura[i]) > 1 / 120;
+      const rot = Math.atan2(pista.tx[i], pista.tz[i]);
+      for (const lado of [-1, 1]) {
+        const dist = meia + (urbano ? 2.6 : 3.4);
+        const inst = {
+          x: pista.px[i] + pista.nx[i] * lado * dist,
+          y: pista.py[i] - 0.02,
+          z: pista.pz[i] + pista.nz[i] * lado * dist,
+          rot, escala: 1,
+        };
+        // fence alta nas curvas de alta energia, baixa no resto
+        if (curvaForte) postesFenceAlto.push(inst);
+        else postesFence.push(inst);
+      }
+      // marcadores rente à borda, alternando cor — o estroboscópio lateral
+      if (i % (passoIdx * 2) === 0) {
+        for (const lado of [-1, 1]) {
+          const d2 = meia + 0.9;
+          marcadores.push({
+            x: pista.px[i] + pista.nx[i] * lado * d2,
+            y: pista.py[i] - 0.02,
+            z: pista.pz[i] + pista.nz[i] * lado * d2,
+            rot, escala: 1,
+            vermelho: Math.floor(pista.s[i] / 34) % 2 === 0,
+          });
+        }
+      }
+    }
+  }
+
   // ── Placas de frenagem antes das curvas fortes ───────────────────────────
   // São referência visual de verdade: o jogador aprende "freio na placa 2".
   const passo = pista.comprimento / n;
@@ -262,6 +335,15 @@ export function gerarCenario(pista: Pista, hora: HoraDoDia): Group {
     if (m) grupo.add(m);
   };
 
+  if (postesFence.length) adicionar(geoPosteFence(luzAmbiente, false), postesFence);
+  if (postesFenceAlto.length) adicionar(geoPosteFence(luzAmbiente, true), postesFenceAlto);
+  for (const vermelho of [true, false]) {
+    const lista = marcadores.filter((m) => m.vermelho === vermelho);
+    if (!lista.length) continue;
+    const m = montarInstancias(geoMarcador(luzAmbiente, vermelho), lista,
+      new MeshBasicMaterial({ vertexColors: true, side: DoubleSide }));
+    if (m) grupo.add(m);
+  }
   if (arvores.length) adicionar(geoArvore(luzAmbiente), arvores);
   if (arquibancadas.length) adicionar(geoArquibancada(luzAmbiente), arquibancadas);
   if (predios.length) adicionar(geoPredio(luzAmbiente), predios);
