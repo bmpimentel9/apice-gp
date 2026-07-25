@@ -13,12 +13,26 @@
 import {
   Scene, PerspectiveCamera, WebGLRenderer, FogExp2, Group, Vector3, Color,
   DirectionalLight, AmbientLight, WebGLRenderTarget, OrthographicCamera,
-  ShaderMaterial, PlaneGeometry, Mesh, LinearFilter, SRGBColorSpace,
+  ShaderMaterial, PlaneGeometry, Mesh, LinearFilter, LinearSRGBColorSpace,
+  ColorManagement,
 } from 'three';
+
+/**
+ * Gestão de cor desligada de propósito.
+ *
+ * Com ela ativa, o Three converte cada cor hex de sRGB para linear na entrada e
+ * de volta na saída. Para renderização fisicamente correta isso é o certo — mas
+ * aqui a iluminação é toda assada à mão em cores escolhidas a dedo, e a
+ * conversão dupla afundava a cena inteira (o asfalto saía quase preto). Sem
+ * gestão de cor, o que está no código é exatamente o que aparece na tela.
+ */
+ColorManagement.enabled = false;
 import type { Pista } from '../sim/track';
 import type { EstadoCarro } from '../sim/car';
 import { gerarMundo, gerarCeu } from './world';
 import { criarCarro3D, type Carro3D } from './car3d';
+import { gerarCenario, gerarNuvens } from './scenery';
+import { SistemaParticulas, COR_POEIRA, COR_FUMACA, COR_FAISCA } from './particles';
 import { AMBIENTES, type HoraDoDia } from './palette';
 import { VEL_MAXIMA } from '../sim/constants';
 import type { Equipe } from '../data/teams';
@@ -67,8 +81,8 @@ const fragCor = `
 
     // grading
     cor = mix(cor, cor * uTint, 0.14);
-    cor = pow(max(cor, 0.0), vec3(0.9));
-    cor *= 1.1;
+    cor = pow(max(cor, 0.0), vec3(1.06));
+    cor *= 1.22;
 
     // grão sutil, disfarça o banding dos gradientes
     float g = fract(sin(dot(uv * vec2(1.0 + uTempo * 0.0001, 1.0), vec2(12.9898, 78.233))) * 43758.5453);
@@ -92,7 +106,11 @@ export class Renderizador {
   private cameraPos = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private matPos: ShaderMaterial;
   private mundo?: Group;
+  private cenario?: Group;
+  private nuvens?: Group;
   private ceu?: Mesh;
+  private poeira = new SistemaParticulas(false);
+  private faiscas = new SistemaParticulas(true);
   private carros = new Map<string, Carro3D>();
   private pista?: Pista;
   private hora: HoraDoDia = 'dia';
@@ -110,16 +128,16 @@ export class Renderizador {
       canvas, antialias: false, powerPreference: 'high-performance',
       alpha: false, stencil: false, depth: true,
     });
-    this.renderer.outputColorSpace = SRGBColorSpace;
+    this.renderer.outputColorSpace = LinearSRGBColorSpace;
     this.renderer.setClearColor(0x0a0e18, 1);
 
     this.camera = new PerspectiveCamera(62, 1, 0.4, 4600);
 
     // uma luz direcional só, para os carros — a cena estática é assada
-    const sol = new DirectionalLight(0xfff4e0, 2.1);
+    const sol = new DirectionalLight(0xfff4e0, 1.55);
     sol.position.set(60, 120, 40);
     this.cena.add(sol);
-    this.cena.add(new AmbientLight(0x8ea6c8, 1.5));
+    this.cena.add(new AmbientLight(0xa8bcd8, 1.15));
 
     this.alvoRT = new WebGLRenderTarget(2, 2, { minFilter: LinearFilter, magFilter: LinearFilter, depthBuffer: true });
     this.matPos = new ShaderMaterial({
@@ -136,19 +154,28 @@ export class Renderizador {
       depthTest: false, depthWrite: false,
     });
     this.cenaPos.add(new Mesh(new PlaneGeometry(2, 2), this.matPos));
+    this.cena.add(this.poeira.pontos, this.faiscas.pontos);
   }
 
   carregarPista(pista: Pista, hora: HoraDoDia) {
     if (this.mundo) { this.cena.remove(this.mundo); this.descartar(this.mundo); }
+    if (this.cenario) { this.cena.remove(this.cenario); this.descartar(this.cenario); }
+    if (this.nuvens) { this.cena.remove(this.nuvens); }
     if (this.ceu) { this.cena.remove(this.ceu); }
+    this.poeira.limpar();
+    this.faiscas.limpar();
     this.pista = pista;
     this.hora = hora;
     const amb = AMBIENTES[hora];
     const { grupo } = gerarMundo(pista, hora);
     this.mundo = grupo;
     this.cena.add(grupo);
+    this.cenario = gerarCenario(pista, hora);
+    this.cena.add(this.cenario);
     this.ceu = gerarCeu(hora);
     this.cena.add(this.ceu);
+    const nv = gerarNuvens(hora);
+    if (nv) { this.nuvens = nv; this.cena.add(nv); }
     this.cena.fog = new FogExp2(new Color(amb.neblina).getHex(), amb.neblinaDensidade);
     this.renderer.setClearColor(new Color(amb.neblina).getHex(), 1);
     this.matPos.uniforms.uTint.value = new Color(amb.corLuz);
@@ -196,6 +223,29 @@ export class Renderizador {
   pulsoImpacto(forca = 1) { this.impacto = Math.min(1, this.impacto + forca); }
 
   /**
+   * Emite as partículas do carro do jogador. Poeira quando pisa fora, fumaça
+   * quando trava a roda ou escorrega, faísca quando o assoalho raspa em alta
+   * velocidade — os três sinais que o jogador lê sem olhar o HUD.
+   */
+  emitirDoCarro(estado: EstadoCarro, dt: number) {
+    const atras = 2.2;
+    const bx = estado.x - Math.sin(estado.yaw) * atras;
+    const bz = estado.z - Math.cos(estado.yaw) * atras;
+
+    if (estado.foraDaPista && estado.velocidade > 6) {
+      const q = Math.min(4, Math.ceil(estado.velocidade * dt * 3));
+      this.poeira.emitir(bx, estado.y + 0.1, bz, 1.6, 2.4, COR_POEIRA, 26, 0.85, q, -2.2);
+    }
+    if (estado.derrapando > 0.25 && estado.velocidade > 10) {
+      const q = Math.min(3, Math.ceil(estado.derrapando * 3 * dt * 40));
+      this.poeira.emitir(bx, estado.y + 0.16, bz, 1.3, 1.5, COR_FUMACA, 20, 0.6, q, -0.7);
+    }
+    if (estado.velocidade > 62 && Math.random() < dt * 12) {
+      this.faiscas.emitir(bx, estado.y + 0.06, bz, 0.7, 3.2, COR_FAISCA, 7, 0.34, 2, -7);
+    }
+  }
+
+  /**
    * Atualiza a câmera de perseguição. `dt` real para suavização independente
    * de taxa de quadros.
    */
@@ -209,28 +259,33 @@ export class Renderizador {
     const recuo = 9.8 + frac * 5.6;
     const altura = 4.3 + frac * 1.7;
 
-    const dirX = Math.sin(estado.yaw), dirZ = Math.cos(estado.yaw);
-    const alvoPos = new Vector3(
-      estado.x - dirX * recuo,
-      estado.y + altura,
-      estado.z - dirZ * recuo,
-    );
-
     // A mira parte do CARRO e segue uma direção — não a posição absoluta da
     // pista. Mirar no traçado desloca o carro para o canto da tela sempre que
     // ele não está exatamente no centro da pista, que é quase sempre.
+    const dirX = Math.sin(estado.yaw), dirZ = Math.cos(estado.yaw);
     const adiante = pista.amostrar(estado.s + 30 + frac * 55);
     const mistX = dirX * 0.42 + adiante.tx * 0.58;
     const mistZ = dirZ * 0.42 + adiante.tz * 0.58;
     const norma = Math.hypot(mistX, mistZ) || 1;
+    const eixoX = mistX / norma, eixoZ = mistZ / norma;
     const distMira = 21 + frac * 16;
+
+    // A câmera fica atrás do carro NA DIREÇÃO DA MIRA, e não na direção do
+    // nariz. É isso que mantém o carro no centro horizontal da tela: com a
+    // câmera alinhada ao nariz, qualquer ângulo entre carro e pista joga o
+    // carro para o canto — e em curva ele chegava a sair de quadro.
+    const alvoPos = new Vector3(
+      estado.x - eixoX * recuo,
+      estado.y + altura,
+      estado.z - eixoZ * recuo,
+    );
 
     // A mira fica BAIXA: é o que inclina a câmera para o chão e empurra o
     // horizonte para o terço superior, liberando tela para a pista à frente.
     const mira = new Vector3(
-      estado.x + (mistX / norma) * distMira,
+      estado.x + eixoX * distMira,
       estado.y + 0.15,
-      estado.z + (mistZ / norma) * distMira,
+      estado.z + eixoZ * distMira,
     );
 
     if (!this.iniciada) {
@@ -263,6 +318,7 @@ export class Renderizador {
     this.camera.updateProjectionMatrix();
 
     if (this.ceu) this.ceu.position.set(this.camera.position.x, 0, this.camera.position.z);
+    if (this.nuvens) this.nuvens.position.set(this.camera.position.x, 0, this.camera.position.z);
 
     this.matPos.uniforms.uVelocidade.value = frac;
     this.matPos.uniforms.uImpacto.value = this.impacto;
@@ -281,6 +337,8 @@ export class Renderizador {
 
   desenhar(dt: number) {
     this.tempo += dt;
+    this.poeira.atualizar(dt);
+    this.faiscas.atualizar(dt);
     this.matPos.uniforms.uTempo.value = this.tempo;
     this.renderer.setRenderTarget(this.alvoRT);
     this.renderer.render(this.cena, this.camera);

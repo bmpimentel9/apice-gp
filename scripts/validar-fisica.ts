@@ -25,7 +25,7 @@ for (const dados of CIRCUITOS) {
   const piloto = new Piloto(pista, { ritmo: 1, coragem: 1, imprecisao: 0, offsetPreferido: 0 });
   const ctx: ContextoFisica = {
     pista,
-    assistencias: NIVEIS.profissional,
+    assistencias: NIVEIS.piloto,
     vacuo: 0, arSujo: 0,
     temMuros: dados.id === 'principado' || dados.id === 'corniche',
     limitadorPit: false,

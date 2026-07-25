@@ -26,12 +26,12 @@ export interface Ambiente {
 
 export const AMBIENTES: Record<HoraDoDia, Ambiente> = {
   dia: {
-    ceuTopo: '#3F86D6', ceuHorizonte: '#CFE7F7',
+    ceuTopo: '#2E6FBE', ceuHorizonte: '#BEDCF2',
     neblina: '#C3DCEE', neblinaDensidade: 0.0014,
     luz: 1.18, sol: [0.45, 0.82, 0.35], corLuz: '#FFF8EA', corSombra: '#7F93AE',
   },
   tarde: {
-    ceuTopo: '#20386E', ceuHorizonte: '#FFB477',
+    ceuTopo: '#16294F', ceuHorizonte: '#FF9E52',
     neblina: '#C9A187', neblinaDensidade: 0.0018,
     luz: 1.1, sol: [-0.72, 0.36, 0.28], corLuz: '#FFE3C4', corSombra: '#6E6389',
   },
@@ -43,7 +43,7 @@ export const AMBIENTES: Record<HoraDoDia, Ambiente> = {
 };
 
 export const CORES = {
-  asfalto: '#43464E',
+  asfalto: '#4A4E57',
   asfaltoClaro: '#4E515A',
   asfaltoEscuro: '#3A3D44',
   borracha: '#2A2C31',
@@ -83,7 +83,7 @@ export function corComLuz(hex: string, fator: number, amb: Ambiente): [number, n
   const misturar = (base: number, cl: number, cs: number) => {
     const ambiente = AMBIENTE * (0.78 + cs * 0.44);
     const direta = DIRETA * cl * f;
-    return base * (ambiente + direta) * amb.luz * 1.06;
+    return base * (ambiente + direta) * amb.luz * 0.94;
   };
   return [
     Math.min(1, misturar(_c.r, luz.r, sombra.r)),

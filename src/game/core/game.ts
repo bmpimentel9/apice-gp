@@ -13,6 +13,7 @@ import {
   type EstadoCarro, type ContextoFisica,
 } from '../sim/car';
 import { Sessao, voltasRecomendadas, type ModoSessao, type ResultadoPiloto } from '../sim/race';
+import { direcaoAssistida, lerFrenagem, avaliarCurva, freioDeSeguranca, type QualidadeCurva } from '../sim/driving';
 import { Renderizador } from '../render/scene';
 import { Entrada } from './input';
 import { Audio } from './audio';
@@ -50,6 +51,13 @@ export interface QuadroHUD {
   fps: number;
   /** Severidade da próxima curva (1 = rápida, 6 = grampo) e distância. */
   proximaCurva: { severidade: number; distancia: number; direcao: number } | null;
+  /** Quanto freio a curva à frente pede agora (0–1) e se já está atrasado. */
+  freioNecessario: number;
+  freioAtrasado: boolean;
+  /** Nota da última curva, para o retorno imediato ao jogador. */
+  notaCurva: { qualidade: string; idade: number } | null;
+  /** Posição do carro na largura da pista, -1 a 1. */
+  posicaoNaPista: number;
 }
 
 export interface ResultadoVolta {
@@ -131,7 +139,7 @@ export class Jogo {
     this.sessao = new Sessao(this.pista, modo, voltas);
 
     const prefs = armazenamento.lerPrefs();
-    const nivel = NIVEIS[opcoes.assistencia ?? prefs.assistencia] ?? NIVEIS.intermediario;
+    const nivel = NIVEIS[opcoes.assistencia ?? prefs.assistencia] ?? NIVEIS.automatico;
 
     this.render.carregarPista(this.pista, this.circuito.hora);
 
@@ -183,6 +191,9 @@ export class Jogo {
     this.terminou = false;
     this.distanciaTotal = 0;
     this.voltaAnterior = 0;
+    this.ultimaCurva = null;
+    this.vMinimaCurva = Infinity;
+    this.emCurva = false;
   }
 
   private reiniciarVolta() {
@@ -278,9 +289,14 @@ export class Jogo {
       this.ctxFisica.arSujo = aero.arSujo;
     }
 
+    // O comando do polegar vira "onde eu quero estar na pista"; quem cuida do
+    // volante é a assistência de traçado.
+    const assist = direcaoAssistida(this.carro, this.pista, this.entrada.estado.direcao, this.ctxFisica.assistencias, this.ctxFisica.temMuros);
+    this.alvoLateral = assist.alvoLateral;
+    const leituraFreio = lerFrenagem(this.carro, this.pista);
     const entrada = {
-      direcao: this.entrada.estado.direcao,
-      freio: this.entrada.estado.freio,
+      direcao: assist.direcao,
+      freio: freioDeSeguranca(this.entrada.estado.freio, leituraFreio, this.ctxFisica.assistencias),
       overtake: this.entrada.estado.overtake && (e.modo !== 'corrida' || this.sessao.overtakeDisponivel(this.distanciaTotal)),
     };
 
@@ -293,6 +309,26 @@ export class Jogo {
       (this.carro.volta > voltaAntes ? this.pista.comprimento : 0);
 
     this.gravador.amostrar(this.carro, this.tempoVolta);
+
+    // ── Leitura do ponto de frenagem (o verbo do jogo) ──────────────────────
+    this.frenagem = leituraFreio;
+
+    // Acompanha a passagem por cada curva para dar a nota ao jogador.
+    const iAqui = Math.min(this.pista.n - 1, Math.floor((this.carro.s / this.pista.comprimento) * this.pista.n));
+    const curvaAqui = Math.abs(this.pista.curvatura[iAqui]) > 1 / 220;
+    if (curvaAqui) {
+      this.emCurva = true;
+      this.vMinimaCurva = Math.min(this.vMinimaCurva, this.carro.velocidade);
+    } else if (this.emCurva) {
+      this.emCurva = false;
+      if (isFinite(this.vMinimaCurva) && this.vMinimaCurva > 4) {
+        const vOtima = this.pista.velocidadeOtima[iAqui];
+        const q = avaliarCurva(this.vMinimaCurva, vOtima);
+        this.ultimaCurva = { qualidade: q, em: this.tempoVolta };
+        if (q === 'perfeito') this.audio.bipe(1760, 0.07, 0.09);
+      }
+      this.vMinimaCurva = Infinity;
+    }
 
     // limites de pista
     if (this.carro.foraDaPista && Math.abs(this.carro.lateral) > this.pista.largura / 2 + 1.6) {
@@ -331,6 +367,11 @@ export class Jogo {
   }
 
   private tempoParado = 0;
+  private alvoLateral = 0;
+  private frenagem = { necessario: 0, distanciaAtePonto: Infinity, velocidadeAlvo: 0, atrasado: false };
+  private vMinimaCurva = Infinity;
+  private emCurva = false;
+  private ultimaCurva: { qualidade: QualidadeCurva; em: number } | null = null;
 
   private completarVolta() {
     const tempo = this.tempoVolta;
@@ -404,6 +445,7 @@ export class Jogo {
   private desenhar(dt: number) {
     const e = this.sessao.estado;
     this.render.atualizarCarro('jogador', this.carro);
+    this.render.emitirDoCarro(this.carro, dt);
     this.render.atualizarCamera(this.carro, dt);
 
     if (e.modo === 'corrida') {
@@ -470,6 +512,12 @@ export class Jogo {
       penalidade: e.penalidadeJogador,
       fps: this.fps,
       proximaCurva: this.proximaCurva(),
+      freioNecessario: this.frenagem.necessario,
+      freioAtrasado: this.frenagem.atrasado,
+      notaCurva: this.ultimaCurva
+        ? { qualidade: this.ultimaCurva.qualidade, idade: this.tempoVolta - this.ultimaCurva.em }
+        : null,
+      posicaoNaPista: Math.max(-1, Math.min(1, this.carro.lateral / (this.pista.largura / 2))),
     };
   }
 
