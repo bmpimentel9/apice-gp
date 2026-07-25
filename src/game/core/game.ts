@@ -58,6 +58,8 @@ export interface QuadroHUD {
   notaCurva: { qualidade: string; idade: number } | null;
   /** Posição do carro na largura da pista, -1 a 1. */
   posicaoNaPista: number;
+  /** Distância de arco na volta atual, para o minimapa. */
+  arco: number;
 }
 
 export interface ResultadoVolta {
@@ -518,6 +520,7 @@ export class Jogo {
         ? { qualidade: this.ultimaCurva.qualidade, idade: this.tempoVolta - this.ultimaCurva.em }
         : null,
       posicaoNaPista: Math.max(-1, Math.min(1, this.carro.lateral / (this.pista.largura / 2))),
+      arco: this.carro.s,
     };
   }
 

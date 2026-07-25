@@ -256,8 +256,8 @@ export class Renderizador {
 
     // A câmera sobe e recua com a velocidade — abre o campo de visão quando o
     // tempo de reação encolhe.
-    const recuo = 9.8 + frac * 5.6;
-    const altura = 4.3 + frac * 1.7;
+    const recuo = 12.6 + frac * 6.4;
+    const altura = 5.0 + frac * 2.0;
 
     // A mira parte do CARRO e segue uma direção — não a posição absoluta da
     // pista. Mirar no traçado desloca o carro para o canto da tela sempre que
@@ -268,7 +268,7 @@ export class Renderizador {
     const mistZ = dirZ * 0.42 + adiante.tz * 0.58;
     const norma = Math.hypot(mistX, mistZ) || 1;
     const eixoX = mistX / norma, eixoZ = mistZ / norma;
-    const distMira = 21 + frac * 16;
+    const distMira = 24 + frac * 18;
 
     // A câmera fica atrás do carro NA DIREÇÃO DA MIRA, e não na direção do
     // nariz. É isso que mantém o carro no centro horizontal da tela: com a
