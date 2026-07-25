@@ -12,7 +12,9 @@ export const MASSA_PILOTO = 82; // kg [R]
 export const ENTRE_EIXOS = 3.4; // m [R]
 export const LARGURA_CARRO = 1.9; // m [R]
 export const COMPRIMENTO_CARRO = 5.4; // m [E]
-export const ALTURA_CG = 0.3; // m [E]
+/** CG bem baixo: reduz a transferência de carga na frenagem, que era o que
+ * soltava a traseira a cada inversão de volante sob 2,5 g. */
+export const ALTURA_CG = 0.26; // m [E]
 export const DIST_PESO_DIANT = 0.46; // fração da massa no eixo dianteiro [E]
 /** Momento de inércia em yaw. Aproximação m*(L/2)^2*k para monopostos. */
 export const INERCIA_YAW = 1100; // kg·m² [E]
@@ -56,7 +58,15 @@ export const AR_SUJO_PERDA_DOWNFORCE = 0.18;
 // ── Pneus ────────────────────────────────────────────────────────────────────
 export const MU_LONGITUDINAL = 1.75; // [E]
 export const MU_LATERAL = 1.8; // [E]
-export const SLIP_PICO_RAD = (7 * Math.PI) / 180; // ângulo de deriva de pico [E]
+/**
+ * Ângulo de deriva de pico. O valor de engenharia para slick de F1 fica perto de
+ * 7°, mas num controle de polegar isso torna a perda de aderência instantânea
+ * demais. 10° mantém o formato da curva e dá ao jogador o aviso de que está
+ * escorregando antes de perder o carro.
+ */
+export const SLIP_PICO_RAD = (10 * Math.PI) / 180; // [E]
+/** Amortecimento natural em guinada — todo carro real tem, e estabiliza. */
+export const AMORTECIMENTO_YAW = 0.55;
 
 export type Composto = 'macio' | 'medio' | 'duro';
 
@@ -121,7 +131,7 @@ export const ESTERCO_MAX_RAD = (16 * Math.PI) / 180;
 /** Em alta velocidade o esterço é limitado — sem isso o carro é ingovernável. */
 export const ESTERCO_VEL_REFERENCIA = 42; // m/s
 export const ESTERCO_FATOR_MINIMO = 0.26;
-export const ESTERCO_SUAVIZACAO = 0.08; // s
+export const ESTERCO_SUAVIZACAO = 0.11; // s
 
 // ── Assistências ─────────────────────────────────────────────────────────────
 export interface Assistencias {
