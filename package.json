@@ -8,7 +8,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:pistas && npm run test:fisica && npm run test:fantasma",
+    "test:pistas": "tsx scripts/validar-pistas.ts",
+    "test:fisica": "tsx scripts/validar-fisica.ts",
+    "test:fantasma": "tsx scripts/validar-fantasma.ts",
+    "test:browser": "node scripts/teste-navegador.mjs",
+    "test:gp": "node scripts/teste-gp.mjs"
   },
   "dependencies": {
     "next": "^15.1.0",

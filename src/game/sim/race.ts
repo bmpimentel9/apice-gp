@@ -114,9 +114,12 @@ export class Sessao {
       const eb = equipePorId(b.equipeId).desempenho + b.habilidade * 0.1;
       return eb - ea;
     });
+    // O grid tem 20 carros no total: o jogador toma a vaga de um dos pilotos,
+    // senão a corrida largaria com 21.
+    const gridRivais = ordenados.slice(0, PILOTOS.length - 1);
 
     let slot = 0;
-    for (const piloto of ordenados) {
+    for (const piloto of gridRivais) {
       slot++;
       if (slot === posJogador) slot++; // o jogador ocupa a sua vaga
       const equipe = equipePorId(piloto.equipeId);

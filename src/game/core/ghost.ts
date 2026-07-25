@@ -15,7 +15,21 @@ import type { EstadoCarro } from '../sim/car';
 
 /** Distância entre amostras, em metros de pista. */
 export const PASSO_AMOSTRA = 20;
-const TEMPO_QUANTUM = 0.004; // s por unidade
+/**
+ * Os tempos são gravados como fração ABSOLUTA da volta em 16 bits, não como
+ * delta entre marcos.
+ *
+ * Duas versões anteriores falharam aqui e vale registrar por quê: com delta de
+ * 1 byte o alcance era de 1,02 s por marco, e qualquer trecho abaixo de 70 km/h
+ * saturava, dessincronizando o fantasma inteiro (140 m de erro no Principado).
+ * Com delta de 2 bytes o alcance deixou de ser problema, mas o arredondamento
+ * de cada marco ACUMULAVA, e o delta na tela — que é o número que o jogador
+ * persegue — errava até 0,22 s.
+ *
+ * Tempo absoluto normalizado resolve os dois: nada satura e nada acumula. A
+ * precisão fica em tempoTotal/65535, ou cerca de 1,6 ms numa volta de 108 s.
+ */
+const TEMPO_ESCALA = 65535;
 const LATERAL_QUANTUM = 0.1; // m por unidade
 const LATERAL_OFFSET = 128;
 
@@ -175,17 +189,16 @@ export function codificarFantasma(f: Fantasma): string {
   let h = 0;
   for (const ch of f.pistaId) h = (h * 31 + ch.charCodeAt(0)) & 255;
   bytes.push(h);
-  // tempo total em centésimos, 3 bytes (até ~2,7 h)
-  const total = Math.round(f.tempoTotal * 100);
-  bytes.push((total >> 16) & 255, (total >> 8) & 255, total & 255);
+  // tempo total em milésimos, 3 bytes (até ~4,6 h)
+  const totalMs = Math.round(f.tempoTotal * 1000);
+  bytes.push((totalMs >> 16) & 255, (totalMs >> 8) & 255, totalMs & 255);
   bytes.push((n >> 8) & 255, n & 255);
 
-  // tempos como delta quantizado; laterais como byte com deslocamento
-  let anterior = 0;
+  // tempo absoluto normalizado em 16 bits; lateral como byte deslocado
+  const total = Math.max(f.tempoTotal, 0.001);
   for (let i = 0; i < n; i++) {
-    const d = Math.round((f.tempos[i] - anterior) / TEMPO_QUANTUM);
-    anterior = f.tempos[i];
-    bytes.push(Math.max(0, Math.min(255, d)));
+    const v = Math.max(0, Math.min(TEMPO_ESCALA, Math.round((f.tempos[i] / total) * TEMPO_ESCALA)));
+    bytes.push((v >> 8) & 255, v & 255);
     const lat = Math.round(f.laterais[i] / LATERAL_QUANTUM) + LATERAL_OFFSET;
     bytes.push(Math.max(0, Math.min(255, lat)));
   }
@@ -199,17 +212,16 @@ export function decodificarFantasma(texto: string, pistaId: string): Fantasma | 
     let h = 0;
     for (const ch of pistaId) h = (h * 31 + ch.charCodeAt(0)) & 255;
     if (b[1] !== h) return null; // fantasma de outra pista
-    const tempoTotal = ((b[2] << 16) | (b[3] << 8) | b[4]) / 100;
+    const tempoTotal = ((b[2] << 16) | (b[3] << 8) | b[4]) / 1000;
     const n = (b[5] << 8) | b[6];
-    if (n <= 0 || 7 + n * 2 > b.length) return null;
+    if (n <= 0 || 7 + n * 3 > b.length) return null;
 
     const tempos = new Float32Array(n);
     const laterais = new Float32Array(n);
-    let acc = 0;
     for (let i = 0; i < n; i++) {
-      acc += b[7 + i * 2] * TEMPO_QUANTUM;
-      tempos[i] = acc;
-      laterais[i] = (b[8 + i * 2] - LATERAL_OFFSET) * LATERAL_QUANTUM;
+      const o = 7 + i * 3;
+      tempos[i] = (((b[o] << 8) | b[o + 1]) / TEMPO_ESCALA) * tempoTotal;
+      laterais[i] = (b[o + 2] - LATERAL_OFFSET) * LATERAL_QUANTUM;
     }
     return {
       pistaId, tempoTotal, tempos, laterais,
