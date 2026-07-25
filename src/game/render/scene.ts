@@ -72,7 +72,7 @@ const fragCor = `
   uniform vec3 uNeblina;
   uniform vec2 uCentro;
 
-  const int AMOSTRAS = 7;
+  const int AMOSTRAS = 5;
 
   // ACES filmica (aproximação de Narkowicz): rolloff suave nos realces
   vec3 aces(vec3 x) {
@@ -91,16 +91,24 @@ const fragCor = `
                 + uImpacto * 0.03;
     float ruido = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
 
-    vec3 cor = vec3(0.0);
-    for (int i = 0; i < AMOSTRAS; i++) {
-      float t = (float(i) + ruido) / float(AMOSTRAS) - 0.5;
-      vec2 o = dir * forca * t;
-      // cada canal com raio ligeiramente diferente: a aberração sai de graça
-      cor.r += texture2D(tCena, uv + o * 1.035).r;
-      cor.g += texture2D(tCena, uv + o).g;
-      cor.b += texture2D(tCena, uv + o * 0.965).b;
+    // Atalho: sem velocidade suficiente o desfoque não aparece, e 15 leituras
+    // de textura por pixel são caras demais para gastar à toa. Abaixo do
+    // limiar, uma amostra só.
+    vec3 cor;
+    if (forca < 0.0015) {
+      cor = texture2D(tCena, uv).rgb;
+    } else {
+      cor = vec3(0.0);
+      for (int i = 0; i < AMOSTRAS; i++) {
+        float t = (float(i) + ruido) / float(AMOSTRAS) - 0.5;
+        vec2 o = dir * forca * t;
+        // cada canal com raio ligeiramente diferente: a aberração sai de graça
+        cor.r += texture2D(tCena, uv + o * 1.04).r;
+        cor.g += texture2D(tCena, uv + o).g;
+        cor.b += texture2D(tCena, uv + o * 0.96).b;
+      }
+      cor /= float(AMOSTRAS);
     }
-    cor /= float(AMOSTRAS);
 
     // ── Linhas de velocidade: só no topo da faixa, para não virar papel de
     // parede. Efeito que o jogador percebe conscientemente é poluição.
@@ -542,6 +550,9 @@ export class Renderizador {
     this.alvoRT.setSize(Math.max(2, Math.floor(largura * dpr * escala)), Math.max(2, Math.floor(altura * dpr * escala)));
   }
 
+  /** Estatísticas do render da cena (não do passe de pós). */
+  estatisticas = { chamadas: 0, triangulos: 0 };
+
   desenhar(dt: number) {
     this.tempo += dt;
     this.poeira.atualizar(dt);
@@ -549,6 +560,9 @@ export class Renderizador {
     this.matPos.uniforms.uTempo.value = this.tempo;
     this.renderer.setRenderTarget(this.alvoRT);
     this.renderer.render(this.cena, this.camera);
+    // captura antes do passe de pós, que zera o contador
+    this.estatisticas.chamadas = this.renderer.info.render.calls;
+    this.estatisticas.triangulos = this.renderer.info.render.triangles;
     this.renderer.setRenderTarget(null);
     this.renderer.render(this.cenaPos, this.cameraPos);
   }

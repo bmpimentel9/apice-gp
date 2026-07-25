@@ -156,15 +156,19 @@ export function gerarMundo(pista: Pista, hora: HoraDoDia, renderer: WebGLRendere
         const meioA = lado * (meia + 0.4);
         const b = lado * (meia + largKerb);
 
-        // Padrão FIA: faixas de 0,8 m alternando vermelho e branco. O segmento
-        // do traçado tem 8 m, então precisa ser SUBDIVIDIDO — pintar uma cor
-        // por segmento faz a alternância cair sempre na mesma paridade e o
-        // kerb inteiro sai de uma cor só.
-        const sub = 10;
+        // Padrão FIA: faixas alternando vermelho e branco. O segmento do
+        // traçado tem 8 m, então precisa ser SUBDIVIDIDO — pintar uma cor por
+        // segmento faz a alternância cair sempre na mesma paridade e o kerb
+        // inteiro sai de uma cor só.
+        //
+        // Cinco subdivisões (faixas de 1,6 m) em vez de dez: à distância de
+        // câmera a leitura é a mesma e o custo cai pela metade. O kerb era o
+        // maior consumidor de triângulos da cena inteira.
+        const sub = 5;
         for (let k = 0; k < sub; k++) {
           const t0 = k / sub, t1 = (k + 1) / sub;
           const sAqui = pista.s[i] + (pista.s[j] - pista.s[i] + (j === 0 ? pista.comprimento : 0)) * t0;
-          const corKerb = Math.floor(sAqui / 0.8) % 2 === 0 ? CORES.kerbA : CORES.kerbB;
+          const corKerb = Math.floor(sAqui / 1.6) % 2 === 0 ? CORES.kerbA : CORES.kerbB;
           const lerpP = (off: number, t: number, alt: number): [number, number, number] => [
             pista.px[i] + (pista.px[j] - pista.px[i]) * t + (pista.nx[i] + (pista.nx[j] - pista.nx[i]) * t) * off,
             pista.py[i] + (pista.py[j] - pista.py[i]) * t + alt,
