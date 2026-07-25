@@ -12,9 +12,9 @@
  */
 import {
   Scene, PerspectiveCamera, WebGLRenderer, FogExp2, Group, Vector3, Color,
-  DirectionalLight, AmbientLight, WebGLRenderTarget, OrthographicCamera,
+  DirectionalLight, HemisphereLight, WebGLRenderTarget, OrthographicCamera,
   ShaderMaterial, PlaneGeometry, Mesh, LinearFilter, LinearSRGBColorSpace,
-  ColorManagement,
+  ColorManagement, PMREMGenerator, SphereGeometry, BackSide, DepthTexture,
 } from 'three';
 
 /**
@@ -56,6 +56,8 @@ const fragCor = `
   uniform float uTempo;
   uniform float uImpacto;      // pulso ao bater ou travar roda
   uniform vec3 uTint;
+  uniform vec3 uNeblina;
+  uniform sampler2D tProfundidade;
 
   void main() {
     vec2 uv = vUv;
@@ -79,10 +81,17 @@ const fragCor = `
     float vinheta = 1.0 - dist * (0.34 + uVelocidade * 0.36 * uIntensidade);
     cor *= clamp(vinheta, 0.0, 1.0);
 
+    // Perspectiva atmosférica: o fundo perde saturação e contrasta com o
+    // primeiro plano. É o que faz uma imagem de pista "ler" como fotografia.
+    float prof = texture2D(tProfundidade, uv).r;
+    float longe = smoothstep(0.986, 0.9995, prof);
+    float cinza = dot(cor, vec3(0.299, 0.587, 0.114));
+    cor = mix(cor, mix(vec3(cinza), uNeblina, 0.55), longe * 0.42);
+
     // grading
     cor = mix(cor, cor * uTint, 0.14);
     cor = pow(max(cor, 0.0), vec3(1.06));
-    cor *= 1.22;
+    cor *= 1.24;
 
     // grão sutil, disfarça o banding dos gradientes
     float g = fract(sin(dot(uv * vec2(1.0 + uTempo * 0.0001, 1.0), vec2(12.9898, 78.233))) * 43758.5453);
@@ -116,6 +125,9 @@ export class Renderizador {
   private hora: HoraDoDia = 'dia';
 
   // estado suavizado da câmera
+  private luzChave!: DirectionalLight;
+  private luzPreenchimento!: HemisphereLight;
+  private luzContra!: DirectionalLight;
   private camPos = new Vector3();
   private camAlvo = new Vector3();
   private iniciada = false;
@@ -125,7 +137,9 @@ export class Renderizador {
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new WebGLRenderer({
-      canvas, antialias: false, powerPreference: 'high-performance',
+      // Em GPU tile-based (todas as da Apple) o resolve de MSAA é praticamente
+      // gratuito, e serrilhado em malha low-poly é o sinal nº 1 de amadorismo.
+      canvas, antialias: true, powerPreference: 'high-performance',
       alpha: false, stencil: false, depth: true,
     });
     this.renderer.outputColorSpace = LinearSRGBColorSpace;
@@ -133,13 +147,27 @@ export class Renderizador {
 
     this.camera = new PerspectiveCamera(62, 1, 0.4, 4600);
 
-    // uma luz direcional só, para os carros — a cena estática é assada
-    const sol = new DirectionalLight(0xfff4e0, 1.55);
-    sol.position.set(60, 120, 40);
-    this.cena.add(sol);
-    this.cena.add(new AmbientLight(0xa8bcd8, 1.15));
+    // Três luzes, e só os carros as recebem — a cena estática é assada.
+    // Chave + preenchimento + contra-luz é o setup clássico de fotografia de
+    // produto, e é o que separa a silhueta do carro do fundo.
+    this.luzChave = new DirectionalLight(0xfff4e0, 1.5);
+    this.luzChave.position.set(60, 120, 40);
+    this.cena.add(this.luzChave);
+    // HemisphereLight custa quase nada: interpola céu/chão pela normal, sem
+    // posição nem sombra. Substitui a ambiente chapada com muito mais volume.
+    this.luzPreenchimento = new HemisphereLight(0xaeceff, 0x3a2f22, 0.9);
+    this.cena.add(this.luzPreenchimento);
+    this.luzContra = new DirectionalLight(0xbfd8ff, 0.85);
+    this.luzContra.position.set(-40, 30, -70);
+    this.cena.add(this.luzContra);
 
-    this.alvoRT = new WebGLRenderTarget(2, 2, { minFilter: LinearFilter, magFilter: LinearFilter, depthBuffer: true });
+    // O MSAA do canvas não se propaga para um render target: sem `samples`, o
+    // passe de pós-processamento devolveria a cena serrilhada.
+    this.alvoRT = new WebGLRenderTarget(2, 2, {
+      minFilter: LinearFilter, magFilter: LinearFilter, depthBuffer: true, samples: 4,
+    });
+    // textura de profundidade: alimenta a perspectiva atmosférica
+    this.alvoRT.depthTexture = new DepthTexture(2, 2);
     this.matPos = new ShaderMaterial({
       vertexShader: fragPos,
       fragmentShader: fragCor,
@@ -150,9 +178,12 @@ export class Renderizador {
         uTempo: { value: 0 },
         uImpacto: { value: 0 },
         uTint: { value: new Color(1, 1, 1) },
+        uNeblina: { value: new Color(0.7, 0.75, 0.82) },
+        tProfundidade: { value: null },
       },
       depthTest: false, depthWrite: false,
     });
+    this.matPos.uniforms.tProfundidade.value = this.alvoRT.depthTexture;
     this.cenaPos.add(new Mesh(new PlaneGeometry(2, 2), this.matPos));
     this.cena.add(this.poeira.pontos, this.faiscas.pontos);
   }
@@ -167,7 +198,7 @@ export class Renderizador {
     this.pista = pista;
     this.hora = hora;
     const amb = AMBIENTES[hora];
-    const { grupo } = gerarMundo(pista, hora);
+    const { grupo } = gerarMundo(pista, hora, this.renderer);
     this.mundo = grupo;
     this.cena.add(grupo);
     this.cenario = gerarCenario(pista, hora);
@@ -177,9 +208,50 @@ export class Renderizador {
     const nv = gerarNuvens(hora);
     if (nv) { this.nuvens = nv; this.cena.add(nv); }
     this.cena.fog = new FogExp2(new Color(amb.neblina).getHex(), amb.neblinaDensidade);
+
+    // As luzes dos carros seguem o ambiente do circuito
+    const [sx, sy, sz] = amb.sol;
+    this.luzChave.position.set(sx * 120, sy * 120, sz * 120);
+    this.luzChave.color.set(amb.corLuz);
+    this.luzChave.intensity = hora === 'noite' ? 0.75 : 1.5;
+    this.luzPreenchimento.color.set(amb.ceuHorizonte);
+    this.luzPreenchimento.groundColor.set(amb.corSombra);
+    this.luzPreenchimento.intensity = hora === 'noite' ? 0.55 : 0.95;
+    this.luzContra.position.set(-sx * 90, 40, -sz * 90);
+    this.luzContra.intensity = hora === 'noite' ? 1.1 : 0.85;
+
+    // Reflexo do céu nos carros, gerado uma única vez a partir de uma cena de
+    // gradiente — sem nenhum arquivo de imagem.
+    this.gerarAmbienteReflexo(amb.ceuTopo, amb.ceuHorizonte);
     this.renderer.setClearColor(new Color(amb.neblina).getHex(), 1);
     this.matPos.uniforms.uTint.value = new Color(amb.corLuz);
+    this.matPos.uniforms.uNeblina.value = new Color(amb.neblina);
     this.iniciada = false;
+  }
+
+  /** PMREM a partir de um céu procedural: dá reflexo real à pintura do carro. */
+  private gerarAmbienteReflexo(topo: string, horizonte: string) {
+    const anterior = this.cena.environment as { dispose?: () => void } | null;
+    anterior?.dispose?.();
+
+    const pmrem = new PMREMGenerator(this.renderer);
+    const cenaCeu = new Scene();
+    const domo = new Mesh(
+      new SphereGeometry(80, 12, 8),
+      new ShaderMaterial({
+        side: BackSide,
+        uniforms: { uTopo: { value: new Color(topo) }, uBaixo: { value: new Color(horizonte) } },
+        vertexShader: `varying float vY; void main(){ vY = normalize(position).y;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+        fragmentShader: `uniform vec3 uTopo; uniform vec3 uBaixo; varying float vY;
+          void main(){ gl_FragColor = vec4(mix(uBaixo, uTopo, pow(max(vY,0.0), 0.45)), 1.0); }`,
+      }),
+    );
+    cenaCeu.add(domo);
+    this.cena.environment = pmrem.fromScene(cenaCeu, 0.04, 1, 200).texture;
+    pmrem.dispose();
+    domo.geometry.dispose();
+    (domo.material as ShaderMaterial).dispose();
   }
 
   garantirCarro(id: string, equipe: Equipe, numero: number) {

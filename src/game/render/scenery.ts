@@ -293,11 +293,11 @@ export function gerarNuvens(hora: HoraDoDia): Group | null {
   const escura = new Color(hora === 'tarde' ? '#C9A5A0' : '#D6E2EE');
   for (let i = 0; i < 26; i++) {
     const ang = ruido(i * 7.3) * Math.PI * 2;
-    const dist = 900 + ruido(i * 3.7) * 1500;
+    const dist = 2000 + ruido(i * 3.7) * 2200;
     const x = Math.cos(ang) * dist;
     const z = Math.sin(ang) * dist;
-    const y = 260 + ruido(i * 11.1) * 240;
-    const l = 190 + ruido(i * 5.5) * 320;
+    const y = 300 + ruido(i * 11.1) * 260;
+    const l = 260 + ruido(i * 5.5) * 340;
     const alt = 26 + ruido(i * 2.2) * 34;
     const antes = c.pos.length / 3;
     c.caixa(l, alt, l * 0.62, cor, 0, 0.7);

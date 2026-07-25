@@ -51,7 +51,9 @@ export const CORES = {
   kerbB: '#F3F1E7',
   kerbAzul: '#1D3FE0',
   linha: '#F3F1E7',
-  grama: '#2F6A38',
+  grama: '#3F7A45',
+  /** Faixa de grama artificial entre o kerb e a escapatória. */
+  gramaArtificial: '#3CB043',
   gramaEscura: '#275A2F',
   brita: '#9C835A',
   britaEscura: '#86704C',
