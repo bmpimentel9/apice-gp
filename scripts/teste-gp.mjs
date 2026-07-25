@@ -65,13 +65,8 @@ try {
     const j = window.__jogo;
     const timer = setInterval(() => {
       const c = j.estadoCarro, p = j.pistaAtual;
-      const i = Math.floor((((c.s + 32) % p.comprimento) / p.comprimento) * p.n);
-      const off = p.offsetLinha[i];
-      const ax = p.px[i] + p.nx[i] * off, az = p.pz[i] + p.nz[i] * off;
-      let e = Math.atan2(ax - c.x, az - c.z) - c.yaw;
-      while (e > Math.PI) e -= Math.PI * 2;
-      while (e < -Math.PI) e += Math.PI * 2;
-      j.entrada.estado.direcao = Math.max(-1, Math.min(1, e * 2.2));
+      // com traçado assistido, zero = seguir a linha de corrida
+      j.entrada.estado.direcao = 0;
       // freia quando a velocidade passa muito do perfil ótimo à frente
       const iF = Math.floor((((c.s + 70) % p.comprimento) / p.comprimento) * p.n);
       j.entrada.estado.freio = c.velocidade > p.velocidadeOtima[iF] * 1.25 ? 0.7 : 0;

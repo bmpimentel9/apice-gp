@@ -64,8 +64,8 @@ function geoArvore(amb: number) {
   const copaA = new Color('#2C6B39').multiplyScalar(amb);
   const copaB = new Color('#357C42').multiplyScalar(amb);
   c.caixa(0.5, 2.2, 0.5, tronco, 0);
-  c.caixa(3.4, 3.0, 3.4, copaA, 2.0, 0.55);
-  c.caixa(2.4, 2.4, 2.4, copaB, 4.4, 0.3);
+  c.caixa(3.4, 4.4, 3.4, copaA, 2.0, 0.28);
+  void copaB;
   return c.geometria();
 }
 
@@ -74,15 +74,15 @@ function geoArquibancada(amb: number) {
   const estrutura = new Color('#5A6068').multiplyScalar(amb);
   const teto = new Color('#3A4048').multiplyScalar(amb);
   // degraus, que sugerem público sem custar nada
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 3; i++) {
     const cor = new Color(i % 2 === 0 ? '#6E757E' : '#565C64').multiplyScalar(amb);
-    c.caixa(22, 1.5, 3.2 - i * 0.1, cor, i * 1.4, 1);
+    c.caixa(22, 2.4, 4.6 - i * 0.2, cor, i * 2.3, 1);
     // "público": faixa colorida sobre cada degrau
     const publico = new Color(i % 3 === 0 ? '#B9C4CF' : i % 3 === 1 ? '#8FA0B4' : '#A5B0BE').multiplyScalar(amb * 0.94);
-    c.caixa(21, 0.55, 2.1, publico, i * 1.4 + 1.5, 1);
+    c.caixa(21, 0.6, 3.0, publico, i * 2.3 + 2.4, 1);
   }
-  c.caixa(24, 0.6, 12, teto, 8.2, 1);
-  c.caixa(1, 8.4, 1, estrutura, 0, 1);
+  c.caixa(24, 0.6, 12, teto, 7.4, 1);
+  c.caixa(1, 7.6, 1, estrutura, 0, 1);
   return c.geometria();
 }
 
@@ -110,9 +110,9 @@ function geoPoste(amb: number, aceso: boolean) {
 
 function geoMuroPneus(amb: number) {
   const c = new Construtor();
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 3; i++) {
     const cor = new Color(i % 2 === 0 ? '#1A1B1E' : '#E8E8E4').multiplyScalar(amb);
-    c.caixa(3.6, 0.7, 1.5, cor, i * 0.68, 1);
+    c.caixa(3.6, 0.92, 1.5, cor, i * 0.9, 1);
   }
   return c.geometria();
 }
@@ -131,13 +131,16 @@ function geoPosteFence(amb: number, alto: boolean) {
   const c = new Construtor();
   const metal = new Color('#8A9099').multiplyScalar(amb);
   const alturaP = alto ? 3.3 : 1.15;
-  c.caixa(0.12, alturaP, 0.12, metal, 0);
-  // base de concreto: dá peso e sombra de contato
-  c.caixa(0.34, 0.22, 0.34, new Color('#8E8E86').multiplyScalar(amb), 0);
-  // cabos horizontais, sugeridos por barras finas
+  // Dois quads cruzados em vez de um prisma: 4 triângulos no lugar de 12, e a
+  // silhueta é idêntica a qualquer ângulo. São centenas de postes ao longo do
+  // traçado, então cada triângulo economizado aqui vale por mil.
+  const meia = 0.07;
+  c.face([[-meia, 0, 0], [meia, 0, 0], [meia, alturaP, 0], [-meia, alturaP, 0]], metal);
+  c.face([[0, 0, -meia], [0, 0, meia], [0, alturaP, meia], [0, alturaP, -meia]], metal.clone().multiplyScalar(0.82));
+  // um cabo horizontal, o suficiente para ler como fence
   const cabo = new Color('#6E747C').multiplyScalar(amb);
-  const níveis = alto ? [1.0, 2.0, 3.0] : [0.5, 1.0];
-  for (const h of níveis) c.caixa(0.05, 0.05, 2.6, cabo, h, 1);
+  const h = alto ? 2.4 : 0.85;
+  c.face([[-1.3, h, 0], [1.3, h, 0], [1.3, h + 0.05, 0], [-1.3, h + 0.05, 0]], cabo);
   return c.geometria();
 }
 
@@ -145,8 +148,9 @@ function geoPosteFence(amb: number, alto: boolean) {
 function geoMarcador(amb: number, vermelho: boolean) {
   const c = new Construtor();
   const cor = new Color(vermelho ? '#D81E2C' : '#F0EEE6').multiplyScalar(amb);
-  c.caixa(0.1, 0.62, 0.1, new Color('#9AA0A8').multiplyScalar(amb), 0);
-  c.caixa(0.3, 0.34, 0.12, cor, 0.55, 1);
+  // placa de duas faces, sem poste: 4 triângulos
+  c.face([[-0.16, 0.34, 0], [0.16, 0.34, 0], [0.16, 0.72, 0], [-0.16, 0.72, 0]], cor);
+  c.face([[0.16, 0.34, 0], [-0.16, 0.34, 0], [-0.16, 0.72, 0], [0.16, 0.72, 0]], cor.clone().multiplyScalar(0.7));
   return c.geometria();
 }
 
@@ -272,7 +276,7 @@ export function gerarCenario(pista: Pista, hora: HoraDoDia): Group {
   // Passo de ~17 m, a 2,4-3,6 m da borda. É o item de maior impacto na
   // sensação de velocidade de todo o projeto.
   {
-    const passoM = 17;
+    const passoM = 21;
     const passoIdx = Math.max(1, Math.round(passoM / (pista.comprimento / n)));
     for (let i = 0; i < n; i += passoIdx) {
       const curvaForte = Math.abs(pista.curvatura[i]) > 1 / 120;
