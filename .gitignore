@@ -4,3 +4,4 @@ node_modules/
 .DS_Store
 out/
 captura-*.png
+tsconfig.tsbuildinfo
