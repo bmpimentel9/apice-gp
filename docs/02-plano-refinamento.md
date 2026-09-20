@@ -1,5 +1,10 @@
 # Plano de trabalho — refinamento visual
 
+> **Superseded.** Câmera com oclusão, carro por lofting, motion blur e cenário
+> procedural já estão no código. A fila de trabalho passou a ser
+> [`docs/03-plano-acao.md`](03-plano-acao.md) — fechar a v1 (largada, box, grid,
+> arranque em movimento) antes de mais polígono.
+
 Objetivo: aproximar o jogo do realismo, com foco em carro, pista, câmera,
 efeitos e sensação de velocidade.
 
