@@ -84,7 +84,9 @@ Escrito integralmente pelo **Claude Opus 5**, do estudo de público ao deploy.
 
 Antes de uma linha de código: pesquisa com cinco especialistas (audiência de F1,
 plataforma iOS, design de corrida em retrato, simulação 2026 e direção de arte) e
-dez iterações de crítica documentadas em [`docs/`](docs/).
+dez iterações de crítica documentadas em [`docs/`](docs/). A fila de trabalho
+atual — o que a v1 ainda deve e o que vem depois — está em
+[`docs/03-plano-acao.md`](docs/03-plano-acao.md).
 
 ### Decisões que valem registro
 

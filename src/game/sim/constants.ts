@@ -2,7 +2,7 @@
  * Constantes do modelo físico e do regulamento 2026.
  *
  * Valores marcados [R] são de regulamento e foram confirmados em fonte
- * (ver docs/02-pesquisa.md). Valores [E] são estimativas de engenharia
+ * (ver docs/00-entendimento.md e docs/01-iteracoes.md). Valores [E] são estimativas de engenharia
  * calibradas para o jogo — plausíveis, mas não oficiais.
  */
 
